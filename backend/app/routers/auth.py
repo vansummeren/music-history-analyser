@@ -18,8 +18,18 @@ from app.models.user import User
 from app.redis_client import get_redis
 from app.schemas.user import UserRead
 from app.services import auth_service
+from app.services.rate_limit import rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# ── Rate-limit dependency (20 requests / 60 s per IP) ────────────────────────
+
+
+async def _login_rate_limit(
+    request: Request,
+    redis: Any = Depends(get_redis),
+) -> None:
+    await rate_limit(request, redis, limit=20, window=60, key_prefix="rl:login")
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -38,7 +48,7 @@ def _frontend_callback(access_token: str, refresh_token: str) -> str:
 # ── OIDC ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("/oidc/login")
+@router.get("/oidc/login", dependencies=[Depends(_login_rate_limit)])
 async def oidc_login(
     request: Request,
     redis: Any = Depends(get_redis),
@@ -165,7 +175,7 @@ async def _prepare_saml_request(request: Request) -> dict[str, Any]:
     }
 
 
-@router.get("/saml/login")
+@router.get("/saml/login", dependencies=[Depends(_login_rate_limit)])
 async def saml_login(request: Request) -> RedirectResponse:
     """Redirect the browser to the SAML IdP."""
     if not settings.saml_sp_entity_id:
@@ -179,7 +189,7 @@ async def saml_login(request: Request) -> RedirectResponse:
     return RedirectResponse(login_url)
 
 
-@router.post("/saml/acs")
+@router.post("/saml/acs", dependencies=[Depends(_login_rate_limit)])
 async def saml_acs(
     request: Request,
     db: AsyncSession = Depends(get_db),
