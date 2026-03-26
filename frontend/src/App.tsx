@@ -1,58 +1,45 @@
-import { Route, Routes } from 'react-router-dom'
+import { Outlet, Route, Routes } from 'react-router-dom'
+import AppShell from './components/AppShell'
 import ProtectedRoute from './components/ProtectedRoute'
+import { AuthProvider } from './hooks/useAuth'
+import { ToastProvider } from './hooks/useToast'
 import AIConfigPage from './pages/AIConfigPage'
 import AnalysisPage from './pages/AnalysisPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
-import HomePage from './pages/HomePage'
+import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
+import RunResultPage from './pages/RunResultPage'
 import SchedulesPage from './pages/SchedulesPage'
 import SpotifyAccountsPage from './pages/SpotifyAccountsPage'
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/auth/callback" element={<AuthCallbackPage />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <HomePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/spotify"
-        element={
-          <ProtectedRoute>
-            <SpotifyAccountsPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/ai-configs"
-        element={
-          <ProtectedRoute>
-            <AIConfigPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/analyses"
-        element={
-          <ProtectedRoute>
-            <AnalysisPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/schedules"
-        element={
-          <ProtectedRoute>
-            <SchedulesPage />
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+    <AuthProvider>
+      <ToastProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppShell>
+                  <Outlet />
+                </AppShell>
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<DashboardPage />} />
+            <Route path="spotify" element={<SpotifyAccountsPage />} />
+            <Route path="ai-configs" element={<AIConfigPage />} />
+            <Route path="analyses" element={<AnalysisPage />} />
+            <Route
+              path="analyses/:analysisId/runs/:runId"
+              element={<RunResultPage />}
+            />
+            <Route path="schedules" element={<SchedulesPage />} />
+          </Route>
+        </Routes>
+      </ToastProvider>
+    </AuthProvider>
   )
 }

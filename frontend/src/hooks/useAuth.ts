@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react'
 import { fetchMe, logout as apiLogout, type UserProfile } from '../services/authApi'
 
 interface AuthState {
@@ -7,7 +15,13 @@ interface AuthState {
   error: string | null
 }
 
-export function useAuth() {
+interface AuthContextValue extends AuthState {
+  logout: () => Promise<void>
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null)
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
     loading: true,
@@ -36,5 +50,15 @@ export function useAuth() {
     setState({ user: null, loading: false, error: null })
   }, [])
 
-  return { ...state, logout }
+  return createElement(
+    AuthContext.Provider,
+    { value: { ...state, logout } },
+    children,
+  )
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
+  return ctx
 }

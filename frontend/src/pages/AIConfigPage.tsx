@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Cpu, Plus, Trash2 } from 'lucide-react'
+import EmptyState from '../components/EmptyState'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import { useToast } from '../hooks/useToast'
 import type { AIConfig, AIConfigCreate } from '../services/aiApi'
 import { createAIConfig, deleteAIConfig, getAIConfigs } from '../services/aiApi'
 
@@ -10,9 +12,9 @@ const PROVIDERS: { value: AIConfig['provider']; label: string }[] = [
 ]
 
 export default function AIConfigPage() {
+  const { showToast } = useToast()
   const [configs, setConfigs] = useState<AIConfig[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   // Form state
   const [provider, setProvider] = useState<AIConfig['provider']>('claude')
@@ -21,21 +23,20 @@ export default function AIConfigPage() {
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
-  useEffect(() => {
-    load()
-  }, [])
-
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
-    setError(null)
     try {
       setConfigs(await getAIConfigs())
     } catch {
-      setError('Failed to load AI configurations.')
+      showToast('Failed to load AI configurations.', 'error')
     } finally {
       setLoading(false)
     }
-  }
+  }, [showToast])
+
+  useEffect(() => {
+    load()
+  }, [load])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -55,6 +56,7 @@ export default function AIConfigPage() {
       setConfigs((prev) => [...prev, created])
       setDisplayName('')
       setApiKey('')
+      showToast('AI configuration saved.', 'success')
     } catch {
       setFormError('Failed to save AI configuration. Please try again.')
     } finally {
@@ -66,120 +68,125 @@ export default function AIConfigPage() {
     try {
       await deleteAIConfig(id)
       setConfigs((prev) => prev.filter((c) => c.id !== id))
+      showToast('Configuration deleted.', 'success')
     } catch {
-      setError('Failed to delete configuration.')
+      showToast('Failed to delete configuration.', 'error')
     }
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-brand-900 to-brand-700 p-6 text-white">
-      <div className="mx-auto max-w-2xl">
-        {/* Header */}
-        <div className="mb-6 flex items-center gap-3">
-          <Link
-            to="/"
-            className="flex items-center gap-1 text-sm text-brand-300 transition hover:text-white"
+    <div className="mx-auto max-w-2xl">
+      <h1 className="mb-6 text-2xl font-bold text-gray-900 dark:text-white">
+        AI Configurations
+      </h1>
+
+      {/* Existing configs */}
+      {loading ? (
+        <LoadingSkeleton lines={3} className="mb-6" />
+      ) : configs.length === 0 ? (
+        <EmptyState
+          icon={<Cpu className="h-10 w-10" />}
+          title="No AI configurations"
+          description="Add an AI provider configuration to start running analyses."
+          className="mb-6"
+        />
+      ) : (
+        <div className="mb-6 flex flex-col gap-3">
+          {configs.map((cfg) => (
+            <div
+              key={cfg.id}
+              className="flex items-center justify-between rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 dark:bg-brand-800/50 dark:ring-brand-700"
+            >
+              <div className="flex items-center gap-3">
+                <Cpu className="h-5 w-5 text-brand-500 dark:text-brand-400" />
+                <div>
+                  <p className="font-semibold text-gray-900 dark:text-white">
+                    {cfg.display_name}
+                  </p>
+                  <p className="text-xs capitalize text-gray-500 dark:text-brand-400">
+                    {cfg.provider}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => handleDelete(cfg.id)}
+                className="rounded p-1.5 text-gray-400 transition hover:text-red-500 dark:text-brand-400 dark:hover:text-red-400"
+                title="Delete"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add new config form */}
+      <form
+        onSubmit={handleSubmit}
+        className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200 dark:bg-brand-800/50 dark:ring-brand-700"
+      >
+        <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
+          Add AI Configuration
+        </h2>
+
+        {formError && (
+          <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
+            {formError}
+          </div>
+        )}
+
+        <div className="mb-3">
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-brand-200">
+            Provider
+          </label>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as AIConfig['provider'])}
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:border-brand-500 focus:outline-none dark:border-brand-700 dark:bg-brand-800 dark:text-white"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Link>
-          <h1 className="text-2xl font-bold">AI Configurations</h1>
+            {PROVIDERS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {error && (
-          <div className="mb-4 rounded-lg bg-red-500/20 px-4 py-3 text-sm text-red-300">
-            {error}
-          </div>
-        )}
+        <div className="mb-3">
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-brand-200">
+            Display Name
+          </label>
+          <input
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="e.g. My Claude Key"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none dark:border-brand-700 dark:bg-brand-800 dark:text-white dark:placeholder-brand-500"
+          />
+        </div>
 
-        {/* Existing configs */}
-        {loading ? (
-          <p className="text-brand-300">Loading…</p>
-        ) : configs.length === 0 ? (
-          <p className="text-brand-300">No AI configurations yet. Add one below.</p>
-        ) : (
-          <div className="mb-6 flex flex-col gap-3">
-            {configs.map((cfg) => (
-              <div
-                key={cfg.id}
-                className="flex items-center justify-between rounded-lg bg-white/10 px-4 py-3"
-              >
-                <div>
-                  <p className="font-semibold">{cfg.display_name}</p>
-                  <p className="text-xs text-brand-300 capitalize">{cfg.provider}</p>
-                </div>
-                <button
-                  onClick={() => handleDelete(cfg.id)}
-                  className="rounded p-1.5 text-brand-300 transition hover:text-red-400"
-                  title="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="mb-4">
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-brand-200">
+            API Key
+          </label>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-…"
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:outline-none dark:border-brand-700 dark:bg-brand-800 dark:text-white dark:placeholder-brand-500"
+          />
+        </div>
 
-        {/* Add new config form */}
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-lg bg-white/10 p-5"
+        <button
+          type="submit"
+          disabled={submitting}
+          className="flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 font-semibold text-white shadow transition hover:bg-brand-400 disabled:opacity-50"
         >
-          <h2 className="mb-4 text-lg font-semibold">Add AI Configuration</h2>
-
-          {formError && (
-            <div className="mb-3 rounded bg-red-500/20 px-3 py-2 text-sm text-red-300">
-              {formError}
-            </div>
-          )}
-
-          <div className="mb-3">
-            <label className="mb-1 block text-sm text-brand-200">Provider</label>
-            <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as AIConfig['provider'])}
-              className="w-full rounded bg-white/10 px-3 py-2 text-white focus:outline-none"
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value} className="text-black">
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="mb-3">
-            <label className="mb-1 block text-sm text-brand-200">Display Name</label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g. My Claude Key"
-              className="w-full rounded bg-white/10 px-3 py-2 text-white placeholder-brand-400 focus:outline-none"
-            />
-          </div>
-
-          <div className="mb-4">
-            <label className="mb-1 block text-sm text-brand-200">API Key</label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-…"
-              className="w-full rounded bg-white/10 px-3 py-2 text-white placeholder-brand-400 focus:outline-none"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 font-semibold text-white shadow transition hover:bg-brand-400 disabled:opacity-50"
-          >
-            <Plus className="h-5 w-5" />
-            {submitting ? 'Saving…' : 'Add Configuration'}
-          </button>
-        </form>
-      </div>
-    </main>
+          <Plus className="h-5 w-5" />
+          {submitting ? 'Saving…' : 'Add Configuration'}
+        </button>
+      </form>
+    </div>
   )
 }
