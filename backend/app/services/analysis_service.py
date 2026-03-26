@@ -28,6 +28,7 @@ def _get_ai_adapter(provider: str) -> AIProvider:
 async def run_analysis(
     db: AsyncSession,
     analysis_id: uuid.UUID,
+    time_window_days: int = 7,
 ) -> AnalysisRun:
     """Execute one analysis run and persist the result.
 
@@ -83,9 +84,9 @@ async def run_analysis(
             spotify_account.token_expires_at = new_expires
             spotify_account.updated_at = now
 
-        # Fetch history (last 7 days)
+        # Fetch history for the specified time window
         music_adapter = SpotifyAdapter()
-        after = now - timedelta(days=7)
+        after = now - timedelta(days=time_window_days)
         tracks = await music_adapter.get_recently_played(
             access_token, after=after, limit=50
         )
