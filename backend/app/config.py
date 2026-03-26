@@ -16,9 +16,20 @@ class Settings(BaseSettings):
     oidc_discovery_url: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
+    # Claim name in the OIDC userinfo/ID-token that contains the user's roles list
+    oidc_roles_claim: str = "roles"
     saml_idp_metadata_url: str = ""
     saml_sp_entity_id: str = ""
     saml_sp_acs_url: str = ""
+    # Attribute name in the SAML assertion that contains the user's roles list
+    saml_roles_attribute: str = "roles"
+
+    # Token lifetimes
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
+
+    # Frontend URL (used to build post-auth redirect)
+    frontend_url: str = "http://localhost:3000"
 
     # Spotify
     spotify_client_id: str = ""
