@@ -1,6 +1,7 @@
 # Music History Analyser
 
 [![CI](https://github.com/vansummeren/music-history-analyser/actions/workflows/ci.yml/badge.svg)](https://github.com/vansummeren/music-history-analyser/actions/workflows/ci.yml)
+[![Deploy](https://github.com/vansummeren/music-history-analyser/actions/workflows/deploy.yml/badge.svg)](https://github.com/vansummeren/music-history-analyser/actions/workflows/deploy.yml)
 
 Analyse your Spotify listening history with AI. Connect your Spotify account, choose an AI
 provider (Claude, Perplexity, …), write a custom prompt, and schedule recurring analyses that
@@ -48,9 +49,9 @@ docker compose exec backend alembic upgrade head
 | [Session 02 — Auth](docs/sessions/session-02-auth.md) | ✅ Complete | SAML / OIDC authentication |
 | [Session 03 — Spotify](docs/sessions/session-03-spotify.md) | ✅ Complete | Spotify OAuth & history |
 | [Session 04 — AI](docs/sessions/session-04-ai.md) | ✅ Complete | AI provider adapters & analysis |
-| [Session 05 — Scheduling](docs/sessions/session-05-scheduling.md) | 🔲 Pending | Celery jobs & email |
-| [Session 06 — Frontend Polish](docs/sessions/session-06-frontend.md) | 🔲 Pending | Full UI/UX |
-| [Session 07 — Deployment](docs/sessions/session-07-deployment.md) | 🔲 Pending | Hardening & deploy pipeline |
+| [Session 05 — Scheduling](docs/sessions/session-05-scheduling.md) | ✅ Complete | Celery jobs & email |
+| [Session 06 — Frontend Polish](docs/sessions/session-06-frontend.md) | ✅ Complete | Full UI/UX |
+| [Session 07 — Deployment](docs/sessions/session-07-deployment.md) | ✅ Complete | Hardening & deploy pipeline |
 
 ---
 

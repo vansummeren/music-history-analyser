@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.middleware import SecurityHeadersMiddleware
 from app.routers.ai_configs import router as ai_configs_router
 from app.routers.analyses import router as analyses_router
 from app.routers.auth import router as auth_router
@@ -20,12 +21,15 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
+    # Security headers must be added before CORS so they are always present
+    app.add_middleware(SecurityHeadersMiddleware)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.backend_cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     app.include_router(auth_router)

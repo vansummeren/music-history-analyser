@@ -52,6 +52,14 @@ class FakeRedis:
     async def delete(self, key: str) -> None:
         self._store.pop(key, None)
 
+    async def incr(self, key: str) -> int:
+        count = int(self._store.get(key, "0")) + 1
+        self._store[key] = str(count)
+        return count
+
+    async def expire(self, key: str, seconds: int) -> None:
+        pass  # TTL not enforced in tests
+
 
 @pytest.fixture
 def fake_redis() -> FakeRedis:

@@ -1,13 +1,17 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
 
 jobs:
   build-and-push:
     name: Build & push images to GHCR
     runs-on: ubuntu-latest
+    # Only deploy when the CI workflow succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       packages: write
