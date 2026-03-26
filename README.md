@@ -39,13 +39,18 @@ docker compose exec backend alembic upgrade head
 | [Architecture](docs/architecture.md) | Tech-stack decisions, component overview, data model |
 | [API Reference](docs/api.md) | Endpoint summary |
 | [Deployment](docs/deployment.md) | Production deployment, env vars, backups |
-| [Session 01 — Foundation](docs/sessions/session-01-foundation.md) | Project skeleton, Docker, CI |
-| [Session 02 — Auth](docs/sessions/session-02-auth.md) | SAML / OIDC authentication |
-| [Session 03 — Spotify](docs/sessions/session-03-spotify.md) | Spotify OAuth & history |
-| [Session 04 — AI](docs/sessions/session-04-ai.md) | AI provider adapters & analysis |
-| [Session 05 — Scheduling](docs/sessions/session-05-scheduling.md) | Celery jobs & email |
-| [Session 06 — Frontend Polish](docs/sessions/session-06-frontend.md) | Full UI/UX |
-| [Session 07 — Deployment](docs/sessions/session-07-deployment.md) | Hardening & deploy pipeline |
+
+### Sessions
+
+| Session | Status | Description |
+|---|---|---|
+| [Session 01 — Foundation](docs/sessions/session-01-foundation.md) | ✅ Complete | Project skeleton, Docker, CI |
+| [Session 02 — Auth](docs/sessions/session-02-auth.md) | ✅ Complete | SAML / OIDC authentication |
+| [Session 03 — Spotify](docs/sessions/session-03-spotify.md) | ✅ Complete | Spotify OAuth & history |
+| [Session 04 — AI](docs/sessions/session-04-ai.md) | ✅ Complete | AI provider adapters & analysis |
+| [Session 05 — Scheduling](docs/sessions/session-05-scheduling.md) | 🔲 Pending | Celery jobs & email |
+| [Session 06 — Frontend Polish](docs/sessions/session-06-frontend.md) | 🔲 Pending | Full UI/UX |
+| [Session 07 — Deployment](docs/sessions/session-07-deployment.md) | 🔲 Pending | Hardening & deploy pipeline |
 
 ---
 
