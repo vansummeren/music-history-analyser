@@ -50,7 +50,7 @@ class ScheduleUpdate(BaseModel):
     def validate_cron(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        from croniter import CroniterBadCronError, croniter  # type: ignore[import-untyped]
+        from croniter import CroniterBadCronError, croniter
 
         try:
             croniter(v)

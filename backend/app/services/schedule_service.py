@@ -23,7 +23,7 @@ def compute_next_run(cron: str, after: datetime | None = None) -> datetime:
     # croniter works with naive datetimes internally; strip tzinfo for input
     base_naive = base.replace(tzinfo=None)
     itr = croniter(cron, base_naive)
-    next_dt: datetime = itr.get_next(datetime)  # type: ignore[assignment]
+    next_dt: datetime = itr.get_next(datetime)
     return next_dt.replace(tzinfo=UTC)
 
 

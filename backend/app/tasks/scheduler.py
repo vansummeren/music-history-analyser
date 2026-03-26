@@ -9,7 +9,7 @@ from app.tasks.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="check_due_schedules")  # type: ignore[misc]
+@celery_app.task(name="check_due_schedules")  # type: ignore
 def check_due_schedules() -> dict[str, object]:
     """Find all due schedules and dispatch a ``run_scheduled_analysis`` task for each."""
     return asyncio.run(_check())

@@ -10,8 +10,8 @@ from app.tasks.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="run_scheduled_analysis", bind=True, max_retries=3)  # type: ignore[misc]
-def run_scheduled_analysis(self: object, schedule_id: str) -> dict[str, object]:  # type: ignore[misc]
+@celery_app.task(name="run_scheduled_analysis", bind=True, max_retries=3)  # type: ignore
+def run_scheduled_analysis(self: object, schedule_id: str) -> dict[str, object]:
     """Execute one analysis run for *schedule_id* and send the result email.
 
     This is a synchronous Celery task that drives async code via
