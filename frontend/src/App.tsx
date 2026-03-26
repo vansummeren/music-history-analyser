@@ -1,5 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
+import AIConfigPage from './pages/AIConfigPage'
+import AnalysisPage from './pages/AnalysisPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
@@ -23,6 +25,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <SpotifyAccountsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-configs"
+        element={
+          <ProtectedRoute>
+            <AIConfigPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/analyses"
+        element={
+          <ProtectedRoute>
+            <AnalysisPage />
           </ProtectedRoute>
         }
       />
