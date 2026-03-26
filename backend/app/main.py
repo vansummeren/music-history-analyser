@@ -7,6 +7,7 @@ from app.config import settings
 from app.routers.ai_configs import router as ai_configs_router
 from app.routers.analyses import router as analyses_router
 from app.routers.auth import router as auth_router
+from app.routers.schedules import router as schedules_router
 from app.routers.spotify import router as spotify_router
 from app.routers.users import router as users_router
 
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(spotify_router)
     app.include_router(ai_configs_router)
     app.include_router(analyses_router)
+    app.include_router(schedules_router)
 
     @app.get("/api/health", tags=["health"])
     async def health() -> dict[str, str]:

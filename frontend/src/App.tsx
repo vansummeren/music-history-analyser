@@ -5,6 +5,7 @@ import AnalysisPage from './pages/AnalysisPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
+import SchedulesPage from './pages/SchedulesPage'
 import SpotifyAccountsPage from './pages/SpotifyAccountsPage'
 
 export default function App() {
@@ -41,6 +42,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <AnalysisPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/schedules"
+        element={
+          <ProtectedRoute>
+            <SchedulesPage />
           </ProtectedRoute>
         }
       />
