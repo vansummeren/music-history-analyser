@@ -1,5 +1,7 @@
 # Session 03 — Spotify Integration
 
+**Status: ✅ Completed**
+
 ## Goal
 Allow authenticated users to link one or more Spotify accounts, and retrieve their recent
 listening history from the Spotify Web API.
