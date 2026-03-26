@@ -1,5 +1,9 @@
 # Session 01 — Foundation & Project Setup
 
+## Status
+
+> ✅ **Completed** — All acceptance criteria have been verified. The full project skeleton is in place, all linters pass (ruff, mypy, eslint), all tests pass (pytest, vitest), and the CI pipeline runs green.
+
 ## Goal
 Establish the complete project skeleton so every subsequent session has a working base
 to build on. By the end of this session all containers start, the database is reachable,
