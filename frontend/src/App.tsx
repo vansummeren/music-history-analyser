@@ -3,6 +3,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import AuthCallbackPage from './pages/AuthCallbackPage'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
+import SpotifyAccountsPage from './pages/SpotifyAccountsPage'
 
 export default function App() {
   return (
@@ -14,6 +15,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <HomePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/spotify"
+        element={
+          <ProtectedRoute>
+            <SpotifyAccountsPage />
           </ProtectedRoute>
         }
       />
