@@ -16,8 +16,9 @@ async def rate_limit(
 ) -> None:
     """Raise HTTP 429 if the caller exceeds *limit* requests per *window* seconds.
 
-    The rate-limit key is derived from the client IP address so that different
-    callers share independent buckets.
+    The counter is incremented atomically with Redis INCR. A TTL is set on the
+    first increment so the window resets automatically.  This avoids the GET →
+    SET race condition that would exist with two separate commands.
 
     Args:
         request:    The incoming FastAPI request (used to extract the client IP).
@@ -29,17 +30,14 @@ async def rate_limit(
     ip = request.client.host if request.client else "unknown"
     key = f"{key_prefix}:{request.url.path}:{ip}"
 
-    count_raw: str | None = await redis.get(key)
-    count = int(count_raw) if count_raw is not None else 0
+    count: int = await redis.incr(key)
+    if count == 1:
+        # New key — set the expiry so the window resets automatically.
+        await redis.expire(key, window)
 
-    if count >= limit:
+    if count > limit:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests — please try again later.",
             headers={"Retry-After": str(window)},
         )
-
-    if count == 0:
-        await redis.set(key, "1", ex=window)
-    else:
-        await redis.set(key, str(count + 1), ex=window)

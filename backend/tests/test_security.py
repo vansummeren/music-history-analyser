@@ -78,26 +78,17 @@ async def test_rate_limit_allows_requests_under_limit(
 async def test_rate_limit_blocks_after_limit_exceeded() -> None:
     """Exceeding the rate limit must return HTTP 429."""
 
-    class CountingFakeRedis:
-        def __init__(self) -> None:
-            self._store: dict[str, str] = {}
+    class OverLimitFakeRedis:
+        """Always returns a count above the limit so 429 is triggered."""
 
-        async def get(self, key: str) -> str | None:
-            return self._store.get(key)
+        async def incr(self, key: str) -> int:
+            return 21  # limit is 20
 
-        async def set(self, key: str, value: str, ex: int | None = None) -> None:
-            self._store[key] = value
-
-        async def delete(self, key: str) -> None:
-            self._store.pop(key, None)
-
-    fake_redis = CountingFakeRedis()
-    # Pre-fill the counter to the limit (20) so the next request is the 21st.
-    # httpx ASGITransport sets the client address to 127.0.0.1.
-    fake_redis._store["rl:login:/api/auth/oidc/login:127.0.0.1"] = "20"
+        async def expire(self, key: str, seconds: int) -> None:
+            pass
 
     async def _override_redis() -> Any:
-        return fake_redis
+        return OverLimitFakeRedis()
 
     app.dependency_overrides[get_redis] = _override_redis
     try:
@@ -115,18 +106,15 @@ async def test_rate_limit_blocks_after_limit_exceeded() -> None:
 async def test_rate_limit_retry_after_header() -> None:
     """HTTP 429 response must include a Retry-After header."""
 
-    class FullFakeRedis:
-        async def get(self, key: str) -> str | None:
-            return "100"  # way over the limit
+    class OverLimitFakeRedis:
+        async def incr(self, key: str) -> int:
+            return 100  # way over the limit
 
-        async def set(self, key: str, value: str, ex: int | None = None) -> None:
-            pass
-
-        async def delete(self, key: str) -> None:
+        async def expire(self, key: str, seconds: int) -> None:
             pass
 
     async def _override_redis() -> Any:
-        return FullFakeRedis()
+        return OverLimitFakeRedis()
 
     app.dependency_overrides[get_redis] = _override_redis
     try:

@@ -103,6 +103,8 @@ jobs:
   pip-audit:
     name: Backend — pip-audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: backend
@@ -118,6 +120,8 @@ jobs:
   npm-audit:
     name: Frontend — npm audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: frontend
