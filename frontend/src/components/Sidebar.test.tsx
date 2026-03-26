@@ -14,7 +14,7 @@ function renderSidebar(open = true) {
 describe('Sidebar', () => {
   it('renders the app brand name', () => {
     renderSidebar()
-    expect(screen.getByText(/Music Analyser/i)).toBeInTheDocument()
+    expect(screen.getByText(/Amadeus/i)).toBeInTheDocument()
   })
 
   it('renders all navigation links', () => {

@@ -35,7 +35,7 @@ export default function Sidebar({ open, onClose }: Props) {
         {/* Logo */}
         <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-brand-800">
           <span className="text-lg font-bold text-brand-600 dark:text-white">
-            🎵 Music Analyser
+            🎵 Amadeus
           </span>
           <button
             onClick={onClose}
