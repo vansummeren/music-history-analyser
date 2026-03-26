@@ -13,6 +13,7 @@ build/
 .pytest_cache/
 htmlcov/
 coverage.xml
+.coverage
 *.cover
 
 # Node
