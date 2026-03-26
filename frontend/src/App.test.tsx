@@ -12,6 +12,6 @@ describe('App', () => {
         <App />
       </MemoryRouter>,
     )
-    expect(screen.getByText('Music History Analyser')).toBeInTheDocument()
+    expect(screen.getByText('Amadeus')).toBeInTheDocument()
   })
 })
