@@ -5,3 +5,4 @@ pytest-cov==6.0.0
 ruff==0.9.1
 mypy==1.14.1
 pip-audit==2.7.3
+aiosqlite==0.20.0
