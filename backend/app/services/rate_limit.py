@@ -1,9 +1,12 @@
 """Redis-backed sliding-window rate limiter for sensitive endpoints."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import HTTPException, Request, status
+
+logger = logging.getLogger(__name__)
 
 
 async def rate_limit(
@@ -36,6 +39,10 @@ async def rate_limit(
         await redis.expire(key, window)
 
     if count > limit:
+        logger.warning(
+            "Rate limit exceeded — path: %s, ip: %s, count: %d/%d",
+            request.url.path, ip, count, limit,
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests — please try again later.",

@@ -1,6 +1,7 @@
 """Analysis service — orchestrates history fetch + AI call + result storage."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -14,6 +15,8 @@ from app.services.ai.base import AIProvider
 from app.services.ai.claude import ClaudeAdapter
 from app.services.ai.perplexity import PerplexityAdapter
 from app.services.music.spotify import SpotifyAdapter
+
+logger = logging.getLogger(__name__)
 
 
 def _get_ai_adapter(provider: str) -> AIProvider:
@@ -65,6 +68,11 @@ async def run_analysis(
     db.add(run)
     await db.flush()  # get the run id
 
+    logger.info(
+        "Analysis run %s started — analysis: %s, provider: %s, window: %d days",
+        run.id, analysis_id, ai_config.provider, time_window_days,
+    )
+
     try:
         # Decrypt the Spotify access token and refresh if expired
         access_token = crypto.decrypt(spotify_account.encrypted_access_token)
@@ -75,6 +83,10 @@ async def run_analysis(
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=UTC)
         if expires_at <= now:
+            logger.info(
+                "Spotify token expired for account %s — refreshing",
+                spotify_account.id,
+            )
             music_adapter = SpotifyAdapter()
             access_token, new_refresh, new_expires = await music_adapter.refresh_token(
                 refresh_token
@@ -83,12 +95,20 @@ async def run_analysis(
             spotify_account.encrypted_refresh_token = crypto.encrypt(new_refresh)
             spotify_account.token_expires_at = new_expires
             spotify_account.updated_at = now
+            logger.info(
+                "Spotify token refreshed for account %s, new expiry: %s",
+                spotify_account.id, new_expires.isoformat(),
+            )
 
         # Fetch history for the specified time window
         music_adapter = SpotifyAdapter()
         after = now - timedelta(days=time_window_days)
         tracks = await music_adapter.get_recently_played(
             access_token, after=after, limit=50
+        )
+        logger.info(
+            "Fetched %d track(s) for analysis %s (window: %d days)",
+            len(tracks), analysis_id, time_window_days,
         )
 
         # Format track list as plain text
@@ -105,6 +125,10 @@ async def run_analysis(
         # Decrypt the AI API key and call the AI provider
         api_key = crypto.decrypt(ai_config.encrypted_api_key)
         ai_adapter = _get_ai_adapter(ai_config.provider)
+        logger.info(
+            "Calling AI provider %r for analysis run %s",
+            ai_config.provider, run.id,
+        )
         ai_result = await ai_adapter.analyse(
             api_key=api_key,
             prompt=analysis.prompt,
@@ -118,11 +142,16 @@ async def run_analysis(
         run.input_tokens = ai_result.input_tokens
         run.output_tokens = ai_result.output_tokens
         run.completed_at = datetime.now(UTC)
+        logger.info(
+            "Analysis run %s completed — model: %s, tokens: %d in / %d out",
+            run.id, ai_result.model, ai_result.input_tokens, ai_result.output_tokens,
+        )
 
     except Exception as exc:  # noqa: BLE001
         run.status = "failed"
         run.error = str(exc)
         run.completed_at = datetime.now(UTC)
+        logger.error("Analysis run %s failed: %s", run.id, exc)
 
     await db.commit()
     await db.refresh(run)

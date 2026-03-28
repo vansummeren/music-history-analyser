@@ -1,6 +1,7 @@
 """Spotify adapter — implements MusicProvider for the Spotify Web API."""
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -8,6 +9,8 @@ import httpx
 
 from app.config import settings
 from app.services.music.base import MusicProvider, Track
+
+logger = logging.getLogger(__name__)
 
 _SPOTIFY_ACCOUNTS_BASE = "https://accounts.spotify.com"
 _SPOTIFY_API_BASE = "https://api.spotify.com/v1"
@@ -38,6 +41,7 @@ class SpotifyAdapter(MusicProvider):
         if before is not None:
             params["before"] = int(before.timestamp() * 1000)
 
+        logger.debug("Fetching recently played tracks from Spotify (limit=%d)", limit)
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{_SPOTIFY_API_BASE}/me/player/recently-played",
@@ -71,6 +75,7 @@ class SpotifyAdapter(MusicProvider):
                 )
             )
 
+        logger.info("Spotify returned %d recently played track(s)", len(tracks))
         return tracks
 
     async def refresh_token(self, refresh_token: str) -> tuple[str, str, datetime]:
@@ -78,6 +83,7 @@ class SpotifyAdapter(MusicProvider):
 
         Returns ``(new_access_token, new_refresh_token, expires_at)``.
         """
+        logger.info("Refreshing Spotify access token")
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{_SPOTIFY_ACCOUNTS_BASE}/api/token",
@@ -98,11 +104,13 @@ class SpotifyAdapter(MusicProvider):
         expires_in: int = token_data.get("expires_in", 3600)
         expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
+        logger.info("Spotify token refreshed, expires in %ds", expires_in)
         return new_access_token, new_refresh_token, expires_at
 
 
 async def exchange_code(code: str) -> dict[str, Any]:
     """Exchange an authorization code for tokens at the Spotify token endpoint."""
+    logger.info("Exchanging Spotify authorization code")
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{_SPOTIFY_ACCOUNTS_BASE}/api/token",
@@ -117,11 +125,13 @@ async def exchange_code(code: str) -> dict[str, Any]:
         )
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
+    logger.debug("Spotify authorization code exchange succeeded")
     return result
 
 
 async def fetch_spotify_user(access_token: str) -> dict[str, Any]:
     """Fetch the Spotify user profile for *access_token*."""
+    logger.debug("Fetching Spotify user profile")
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{_SPOTIFY_API_BASE}/me",
@@ -129,4 +139,5 @@ async def fetch_spotify_user(access_token: str) -> dict[str, Any]:
         )
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
+    logger.info("Spotify user profile fetched — id: %s", result.get("id", "unknown"))
     return result

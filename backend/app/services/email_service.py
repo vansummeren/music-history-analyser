@@ -93,9 +93,21 @@ async def send_analysis_result(
         smtp_kwargs["use_tls"] = False  # STARTTLS below
         smtp_kwargs["start_tls"] = True
 
-    async with aiosmtplib.SMTP(**smtp_kwargs) as smtp:  # type: ignore[arg-type]
-        if settings.smtp_username:
-            await smtp.login(settings.smtp_username, settings.smtp_password)
-        await smtp.send_message(msg)
+    tls_label = "STARTTLS" if settings.smtp_tls else "plain"
+    logger.debug(
+        "Connecting to SMTP %s:%d (%s) for schedule %r",
+        settings.smtp_host, settings.smtp_port, tls_label, schedule_name,
+    )
+    try:
+        async with aiosmtplib.SMTP(**smtp_kwargs) as smtp:  # type: ignore[arg-type]
+            if settings.smtp_username:
+                await smtp.login(settings.smtp_username, settings.smtp_password)
+            await smtp.send_message(msg)
+    except Exception:
+        logger.exception(
+            "Failed to send analysis email to %s for schedule %r",
+            recipient, schedule_name,
+        )
+        raise
 
     logger.info("Analysis email sent to %s for schedule %r", recipient, schedule_name)

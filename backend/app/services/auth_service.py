@@ -1,6 +1,7 @@
 """Authentication service — JWT, token lifecycle, user upsert, IdP helpers."""
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 # ── Redis key prefixes ────────────────────────────────────────────────────────
 _REFRESH_PREFIX = "refresh:"
@@ -80,6 +83,7 @@ async def revoke_access_token(access_token: str, redis: Any) -> None:
         now = int(datetime.now(UTC).timestamp())
         remaining = max(exp - now, 1)
         await redis.set(f"{_REVOKE_PREFIX}{access_token}", "1", ex=remaining)
+        logger.info("Access token revoked (TTL: %ds)", remaining)
     except (JoseError, KeyError):
         pass
 
@@ -114,13 +118,16 @@ _oidc_discovery_cache: dict[str, Any] = {}
 async def fetch_oidc_discovery(discovery_url: str) -> dict[str, Any]:
     """Fetch (and cache in-process) the OIDC discovery document."""
     if discovery_url in _oidc_discovery_cache:
+        logger.debug("OIDC discovery cache hit for %s", discovery_url)
         cached: dict[str, Any] = _oidc_discovery_cache[discovery_url]
         return cached
+    logger.info("Fetching OIDC discovery document from %s", discovery_url)
     async with httpx.AsyncClient() as client:
         resp = await client.get(discovery_url)
         resp.raise_for_status()
         doc: dict[str, Any] = resp.json()
     _oidc_discovery_cache[discovery_url] = doc
+    logger.debug("OIDC discovery document cached for %s", discovery_url)
     return doc
 
 
@@ -128,6 +135,7 @@ async def exchange_oidc_code(
     token_endpoint: str, code: str, redirect_uri: str
 ) -> dict[str, Any]:
     """Exchange an authorization code for tokens at *token_endpoint*."""
+    logger.info("Exchanging OIDC authorization code at %s", token_endpoint)
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             token_endpoint,
@@ -141,6 +149,7 @@ async def exchange_oidc_code(
         )
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
+    logger.debug("OIDC code exchange succeeded")
     return result
 
 
@@ -148,6 +157,7 @@ async def fetch_oidc_userinfo(
     userinfo_endpoint: str, access_token: str
 ) -> dict[str, Any]:
     """Fetch userinfo from the IdP using *access_token*."""
+    logger.debug("Fetching OIDC userinfo from %s", userinfo_endpoint)
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             userinfo_endpoint,
@@ -212,12 +222,20 @@ async def upsert_user(
             role=role,
         )
         db.add(user)
+        logger.info(
+            "New user created — provider: %s, email: %s, role: %s",
+            provider, email, role,
+        )
     else:
         user.email = email
         user.display_name = display_name
         # Role is always re-synced from the IdP on each login.
         user.role = role
         user.updated_at = datetime.now(UTC)
+        logger.info(
+            "Existing user updated — provider: %s, email: %s, role: %s",
+            provider, email, role,
+        )
 
     await db.commit()
     await db.refresh(user)
