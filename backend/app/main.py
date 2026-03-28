@@ -27,6 +27,9 @@ def _log_startup() -> None:
         sep,
         "  Music History Analyser – Backend starting",
         sep,
+        f"  Version             : {settings.app_version}",
+        f"  Build               : #{settings.build_number}  ({settings.build_date})",
+        sep,
     ]
 
     # ── Authentication ────────────────────────────────────────
@@ -84,7 +87,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Music History Analyser",
-        version="0.1.0",
+        version=settings.app_version,
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=_lifespan,

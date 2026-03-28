@@ -6,6 +6,10 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
+ARG BUILD_NUMBER=dev
+ARG BUILD_DATE=unknown
+ENV BUILD_NUMBER=${BUILD_NUMBER} \
+    BUILD_DATE=${BUILD_DATE}
 RUN npm run build
 
 # ── production stage (nginx) ──────────────────────────────────────────────────

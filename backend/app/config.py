@@ -61,5 +61,10 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@example.com"
     smtp_tls: bool = True
 
+    # Build / version info (injected at image-build time via ARG → ENV)
+    app_version: str = "0.1.0"
+    build_number: str = "dev"
+    build_date: str = "unknown"
+
 
 settings = Settings()
