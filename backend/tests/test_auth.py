@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import config as app_config
 from app.models.user import User
 from app.services import auth_service
 from tests.conftest import FakeRedis
@@ -336,3 +337,34 @@ def test_resolve_role_is_case_insensitive() -> None:
 def test_resolve_role_defaults_to_user() -> None:
     assert auth_service.resolve_role([]) == "user"
     assert auth_service.resolve_role(["viewer"]) == "user"
+
+
+# ── 10. /api/auth/login dispatcher ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_login_dispatch_oidc(client: AsyncClient) -> None:
+    """GET /api/auth/login redirects to the OIDC endpoint when auth_provider=oidc."""
+    original = app_config.settings.auth_provider
+    app_config.settings.auth_provider = "oidc"
+    try:
+        response = await client.get("/api/auth/login", follow_redirects=False)
+    finally:
+        app_config.settings.auth_provider = original
+
+    assert response.status_code in (302, 307)
+    assert response.headers["location"].endswith("/api/auth/oidc/login")
+
+
+@pytest.mark.asyncio
+async def test_login_dispatch_saml(client: AsyncClient) -> None:
+    """GET /api/auth/login redirects to the SAML endpoint when auth_provider=saml."""
+    original = app_config.settings.auth_provider
+    app_config.settings.auth_provider = "saml"
+    try:
+        response = await client.get("/api/auth/login", follow_redirects=False)
+    finally:
+        app_config.settings.auth_provider = original
+
+    assert response.status_code in (302, 307)
+    assert response.headers["location"].endswith("/api/auth/saml/login")

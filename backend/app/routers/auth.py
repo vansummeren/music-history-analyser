@@ -45,6 +45,22 @@ def _frontend_callback(access_token: str, refresh_token: str) -> str:
     )
 
 
+# ── Provider dispatcher ───────────────────────────────────────────────────────
+
+
+@router.get("/login", dependencies=[Depends(_login_rate_limit)])
+async def login_dispatch() -> RedirectResponse:
+    """Redirect to the login endpoint for the configured auth provider.
+
+    Using this URL insulates the frontend from needing to know which provider
+    (OIDC or SAML) is active.  Change ``AUTH_PROVIDER`` in the environment and
+    restart the backend — no frontend change required.
+    """
+    if settings.auth_provider == "saml":
+        return RedirectResponse("/api/auth/saml/login")
+    return RedirectResponse("/api/auth/oidc/login")
+
+
 # ── OIDC ─────────────────────────────────────────────────────────────────────
 
 

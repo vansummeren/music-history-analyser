@@ -37,5 +37,5 @@ export async function logout(refreshToken: string | null): Promise<void> {
 
 /** URL that starts the configured IdP login flow (OIDC or SAML). */
 export function getLoginUrl(): string {
-  return '/api/auth/oidc/login'
+  return '/api/auth/login'
 }
