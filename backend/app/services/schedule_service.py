@@ -1,6 +1,7 @@
 """Schedule service — cron helpers and schedule mutation logic."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.analysis import Analysis
 from app.models.schedule import Schedule
 from app.schemas.schedule import ScheduleCreate, ScheduleUpdate
+
+logger = logging.getLogger(__name__)
 
 
 def compute_next_run(cron: str, after: datetime | None = None) -> datetime:
@@ -50,6 +53,10 @@ async def create_schedule(
     db.add(schedule)
     await db.commit()
     await db.refresh(schedule)
+    logger.info(
+        "Schedule %s created — analysis: %s, cron: %r, next run: %s",
+        schedule.id, body.analysis_id, body.cron, next_run.isoformat(),
+    )
     return schedule
 
 
@@ -62,6 +69,9 @@ async def update_schedule(
     now = datetime.now(UTC)
 
     if body.cron is not None:
+        logger.info(
+            "Schedule %s cron updated: %r → %r", schedule.id, schedule.cron, body.cron
+        )
         schedule.cron = body.cron
         schedule.next_run_at = compute_next_run(body.cron)
     if body.time_window_days is not None:
@@ -69,6 +79,9 @@ async def update_schedule(
     if body.recipient_email is not None:
         schedule.recipient_email = body.recipient_email
     if body.is_active is not None:
+        logger.info(
+            "Schedule %s active state changed to %s", schedule.id, body.is_active
+        )
         schedule.is_active = body.is_active
         # Re-compute next run when re-activating
         if body.is_active:
@@ -89,7 +102,10 @@ async def get_due_schedules(db: AsyncSession) -> list[Schedule]:
             Schedule.next_run_at <= now,
         )
     )
-    return list(result.scalars().all())
+    due = list(result.scalars().all())
+    if due:
+        logger.info("Found %d due schedule(s)", len(due))
+    return due
 
 
 async def mark_schedule_ran(db: AsyncSession, schedule: Schedule) -> None:
@@ -99,3 +115,7 @@ async def mark_schedule_ran(db: AsyncSession, schedule: Schedule) -> None:
     schedule.next_run_at = compute_next_run(schedule.cron, after=now)
     schedule.updated_at = now
     await db.commit()
+    logger.info(
+        "Schedule %s advanced — next run: %s",
+        schedule.id, schedule.next_run_at.isoformat(),
+    )

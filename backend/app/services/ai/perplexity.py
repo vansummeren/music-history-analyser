@@ -1,9 +1,13 @@
 """Perplexity adapter — implements AIProvider using the OpenAI-compatible REST API."""
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from app.services.ai.base import AIProvider, AnalysisResult
+
+logger = logging.getLogger(__name__)
 
 _PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
 _DEFAULT_MODEL = "llama-3.1-sonar-small-128k-online"
@@ -19,6 +23,7 @@ class PerplexityAdapter(AIProvider):
         track_list: str,
     ) -> AnalysisResult:
         """Send the prompt and track list to Perplexity and return the result."""
+        logger.debug("Sending request to Perplexity model %s", _DEFAULT_MODEL)
         message_content = f"{prompt}\n\nRecently played tracks:\n{track_list}"
         payload = {
             "model": _DEFAULT_MODEL,
@@ -42,6 +47,12 @@ class PerplexityAdapter(AIProvider):
         usage = data.get("usage", {})
         model: str = data.get("model", _DEFAULT_MODEL)
 
+        logger.info(
+            "Perplexity response received — model: %s, tokens: %d in / %d out",
+            model,
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+        )
         return AnalysisResult(
             text=text,
             model=model,
