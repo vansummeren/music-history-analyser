@@ -25,6 +25,7 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
+    broker_connection_retry_on_startup=True,
     beat_schedule={
         "check-due-schedules-every-minute": {
             "task": "check_due_schedules",
@@ -47,7 +48,7 @@ def _on_worker_ready(sender: Any, **kwargs: Any) -> None:
         f"  Result backend      : {mask_url(settings.redis_url)}",
         "  Registered tasks    :",
     ]
-    for task_name in sorted(sender.tasks):
+    for task_name in sorted(celery_app.tasks):
         if not task_name.startswith("celery."):
             lines.append(f"    • {task_name}")
     lines.append(sep)
