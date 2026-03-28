@@ -34,7 +34,7 @@ celery_app.conf.update(
 )
 
 
-@worker_ready.connect  # type: ignore[misc]
+@worker_ready.connect  # type: ignore[untyped-decorator]
 def _on_worker_ready(sender: Any, **kwargs: Any) -> None:
     """Log non-sensitive configuration when the Celery worker comes online."""
     sep = "=" * 54
