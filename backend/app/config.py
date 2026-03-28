@@ -1,6 +1,23 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse, urlunparse
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def mask_url(url: str) -> str:
+    """Return *url* with any embedded password replaced by ``****``."""
+    try:
+        parsed = urlparse(url)
+        if parsed.password:
+            userinfo = f"{parsed.username}:****"
+            host = parsed.hostname or ""
+            if parsed.port:
+                host = f"{host}:{parsed.port}"
+            return urlunparse(parsed._replace(netloc=f"{userinfo}@{host}"))
+    except Exception:
+        pass
+    return url
 
 
 class Settings(BaseSettings):
