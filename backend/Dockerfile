@@ -22,6 +22,12 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 
 # ── production image ─────────────────────────────────────────────────────────
 FROM deps AS production
+ARG APP_VERSION=0.1.0
+ARG BUILD_NUMBER=dev
+ARG BUILD_DATE=unknown
+ENV APP_VERSION=${APP_VERSION} \
+    BUILD_NUMBER=${BUILD_NUMBER} \
+    BUILD_DATE=${BUILD_DATE}
 COPY . .
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 USER appuser

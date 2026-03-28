@@ -57,6 +57,9 @@ export default function AppShell({ children }: Props) {
         <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>
+        <footer className="shrink-0 border-t border-gray-200 px-6 py-2 text-center text-xs text-gray-400 dark:border-brand-700 dark:text-gray-500">
+          v{__APP_VERSION__} &nbsp;·&nbsp; build&nbsp;#{__BUILD_NUMBER__} &nbsp;·&nbsp; {__BUILD_DATE__}
+        </footer>
       </div>
 
       <Toast />
