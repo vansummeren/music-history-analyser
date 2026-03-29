@@ -65,6 +65,12 @@ services:
     ports:
       - "3000:3000"
     command: npm run dev -- --host
+    environment:
+      # Allows the Vite dev-server proxy to reach the backend container by its
+      # Docker service name instead of relying on localhost port-forwarding.
+      VITE_BACKEND_URL: http://backend:8000
+    networks:
+      - internal
     volumes:
       - ./frontend:/app
       - /app/node_modules

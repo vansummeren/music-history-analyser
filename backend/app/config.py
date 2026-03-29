@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     oidc_discovery_url: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
+    # Explicit redirect URI sent to the IdP.  Must match the value registered in the
+    # IdP (e.g. https://your-app.example.com/api/auth/oidc/callback).
+    # When empty the URI is auto-detected from the incoming request, which only works
+    # correctly when running locally without a reverse proxy.
+    oidc_redirect_uri: str = ""
     # Claim name in the OIDC userinfo/ID-token that contains the user's roles list
     oidc_roles_claim: str = "roles"
     saml_idp_metadata_url: str = ""

@@ -44,9 +44,11 @@ Copy `.env.example` to `.env` and fill in all required values before starting th
 | `OIDC_DISCOVERY_URL` | ✅ (OIDC) | Provider discovery document URL |
 | `OIDC_CLIENT_ID` | ✅ (OIDC) | Client ID registered with the provider |
 | `OIDC_CLIENT_SECRET` | ✅ (OIDC) | Client secret |
+| `OIDC_REDIRECT_URI` | ✅ (OIDC, production) | Redirect URI registered with the IdP — must be `https://<your-app>/api/auth/oidc/callback`.  Required behind any reverse proxy. |
 | `SAML_IDP_METADATA_URL` | ✅ (SAML) | URL to IdP metadata XML |
 | `SAML_SP_ENTITY_ID` | ✅ (SAML) | Service provider entity ID |
 | `SAML_SP_ACS_URL` | ✅ (SAML) | Assertion Consumer Service URL |
+| `FRONTEND_URL` | ✅ | Public URL of the frontend, e.g. `https://your-app.example.com` |
 | `SPOTIFY_CLIENT_ID` | ✅ | Spotify app client ID |
 | `SPOTIFY_CLIENT_SECRET` | ✅ | Spotify app client secret |
 | `SPOTIFY_REDIRECT_URI` | ✅ | OAuth redirect URI, e.g. `http://localhost:8000/api/spotify/callback` |
