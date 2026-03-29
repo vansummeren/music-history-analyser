@@ -20,8 +20,9 @@ All endpoints except the auth callbacks require a valid JWT `Bearer` token in th
 Authorization: Bearer <access_token>
 ```
 
-Tokens are issued after a successful SAML / OIDC login and expire after 15 minutes.
-Use `POST /api/auth/refresh` with a valid refresh token to obtain a new access token.
+Tokens are issued after a successful SAML / OIDC login and expire after 30 minutes
+(configurable via `ACCESS_TOKEN_EXPIRE_MINUTES`).  Obtain a new access token by
+calling `GET /api/auth/login` again (initiates a new IdP login flow).
 
 ---
 
@@ -31,12 +32,12 @@ Use `POST /api/auth/refresh` with a valid refresh token to obtain a new access t
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/api/auth/login` | Redirect to the configured IdP (OIDC or SAML) |
 | `GET` | `/api/auth/oidc/login` | Redirect to OIDC provider |
-| `GET` | `/api/auth/oidc/callback` | OIDC callback |
+| `GET` | `/api/auth/oidc/callback` | OIDC authorization-code callback |
 | `GET` | `/api/auth/saml/login` | Redirect to SAML IdP |
 | `POST` | `/api/auth/saml/acs` | SAML Assertion Consumer Service |
-| `POST` | `/api/auth/refresh` | Refresh access token |
-| `POST` | `/api/auth/logout` | Invalidate tokens |
+| `POST` | `/api/auth/logout` | Revoke access and refresh tokens |
 | `GET` | `/api/auth/me` | Current user profile |
 
 ### Users

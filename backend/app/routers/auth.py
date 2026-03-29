@@ -1,6 +1,7 @@
 """Auth router — OIDC, SAML, logout, and /me."""
 from __future__ import annotations
 
+import html as _html
 import secrets
 import urllib.parse
 from typing import Any
@@ -80,13 +81,16 @@ async def oidc_login(
     nonce = secrets.token_hex(16)
     await auth_service.store_oidc_state(state, nonce, redis)
 
-    redirect_uri = str(request.url_for("oidc_callback"))
+    # Use the explicitly configured redirect URI (required in production behind a
+    # reverse proxy).  Fall back to auto-detection only for local development where
+    # no proxy is involved and request.url_for() is reliable.
+    redirect_uri = settings.oidc_redirect_uri or str(request.url_for("oidc_callback"))
     auth_url = (
         f"{config['authorization_endpoint']}"
         f"?response_type=code"
         f"&client_id={urllib.parse.quote(settings.oidc_client_id)}"
-        f"&redirect_uri={urllib.parse.quote(redirect_uri)}"
-        f"&scope=openid+email+profile"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
+        f"&scope={urllib.parse.quote('openid email profile')}"
         f"&state={state}"
         f"&nonce={nonce}"
     )
@@ -110,7 +114,7 @@ async def oidc_callback(
         )
 
     config = await auth_service.fetch_oidc_discovery(settings.oidc_discovery_url)
-    redirect_uri = str(request.url_for("oidc_callback"))
+    redirect_uri = settings.oidc_redirect_uri or str(request.url_for("oidc_callback"))
 
     token_data = await auth_service.exchange_oidc_code(
         config["token_endpoint"], code, redirect_uri
@@ -253,12 +257,18 @@ async def saml_acs(
     refresh_token = await auth_service.create_refresh_token(user.id, redis)
     callback_url = _frontend_callback(access_token, refresh_token)
 
-    # The IdP sent a POST, so we cannot just issue an HTTP redirect. Return a
-    # tiny HTML page that navigates the browser to the frontend callback URL.
+    # The IdP POSTs here, so a plain HTTP redirect response is not enough —
+    # the browser will follow the redirect but the body won't reach the frontend.
+    # We return a small HTML page that redirects to the frontend callback URL.
+    #
+    # A <meta http-equiv="refresh"> is used instead of an inline <script> so that
+    # the redirect works even when the browser enforces the Content-Security-Policy
+    # header (script-src 'self' blocks inline scripts).
+    safe_url = _html.escape(callback_url, quote=True)
     html = f"""<!doctype html>
 <html><head><meta charset="utf-8">
-<script>window.location.replace({callback_url!r});</script>
-</head><body>Redirecting…</body></html>"""
+<meta http-equiv="refresh" content="0;url={safe_url}">
+</head><body>Redirecting&#8230;</body></html>"""
     return HTMLResponse(html)
 
 

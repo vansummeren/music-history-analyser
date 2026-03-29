@@ -368,3 +368,87 @@ async def test_login_dispatch_saml(client: AsyncClient) -> None:
 
     assert response.status_code in (302, 307)
     assert response.headers["location"].endswith("/api/auth/saml/login")
+
+
+# ── 11. OIDC redirect_uri — explicit override ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_uses_configured_redirect_uri(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+    mock_oidc_discovery: dict[str, Any],
+) -> None:
+    """When OIDC_REDIRECT_URI is set it must appear in the IdP authorization URL."""
+    original_uri = app_config.settings.oidc_redirect_uri
+    original_disc = app_config.settings.oidc_discovery_url
+    app_config.settings.oidc_redirect_uri = "https://prod.example.com/api/auth/oidc/callback"
+    app_config.settings.oidc_discovery_url = "https://idp.example.com/.well-known/openid-configuration"
+    try:
+        response = await client.get("/api/auth/oidc/login", follow_redirects=False)
+    finally:
+        app_config.settings.oidc_redirect_uri = original_uri
+        app_config.settings.oidc_discovery_url = original_disc
+
+    assert response.status_code in (302, 307)
+    location = response.headers["location"]
+    assert "https%3A%2F%2Fprod.example.com%2Fapi%2Fauth%2Foidc%2Fcallback" in location
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_scope_uses_percent_encoding(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+    mock_oidc_discovery: dict[str, Any],
+) -> None:
+    """The scope parameter must be percent-encoded (spaces as %20, not +)."""
+    original_disc = app_config.settings.oidc_discovery_url
+    app_config.settings.oidc_discovery_url = "https://idp.example.com/.well-known/openid-configuration"
+    try:
+        response = await client.get("/api/auth/oidc/login", follow_redirects=False)
+    finally:
+        app_config.settings.oidc_discovery_url = original_disc
+
+    assert response.status_code in (302, 307)
+    location = response.headers["location"]
+    assert "openid%20email%20profile" in location
+    assert "openid+email+profile" not in location
+
+
+# ── 12. SAML ACS redirect — meta-refresh instead of inline script ─────────────
+
+
+@pytest.mark.asyncio
+async def test_saml_acs_uses_meta_refresh(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """SAML ACS must redirect via <meta http-equiv="refresh">, not an inline script.
+
+    An inline <script> is blocked by the Content-Security-Policy (script-src 'self').
+    """
+    from unittest.mock import MagicMock, patch
+
+    mock_auth = MagicMock()
+    mock_auth.process_response.return_value = None
+    mock_auth.get_errors.return_value = []
+    mock_auth.get_attributes.return_value = {
+        "email": ["saml-user@example.com"],
+        "displayName": ["SAML User"],
+    }
+    mock_auth.get_nameid.return_value = "saml-nameid-123"
+
+    with patch("app.routers.auth._build_saml_auth", return_value=mock_auth):
+        response = await client.post("/api/auth/saml/acs", data={})
+
+    assert response.status_code == 200
+    body = response.text
+
+    # Must use meta-refresh, NOT an inline script
+    assert '<meta http-equiv="refresh"' in body
+    assert "<script>" not in body
+
+    # The callback URL must be present in the meta-refresh tag
+    assert "access_token=" in body
+    assert "refresh_token=" in body

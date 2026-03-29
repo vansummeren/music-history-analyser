@@ -20,7 +20,9 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // In Docker Compose the backend is reachable via its service name.
+        // Outside Docker (plain `npm run dev`) the backend is on localhost:8000.
+        target: process.env['VITE_BACKEND_URL'] ?? 'http://localhost:8000',
         changeOrigin: true,
       },
     },

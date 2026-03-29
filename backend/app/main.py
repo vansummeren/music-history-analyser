@@ -38,6 +38,7 @@ def _log_startup() -> None:
     if settings.auth_provider == "oidc":
         lines.append(f"    Discovery URL     : {settings.oidc_discovery_url or '(not set)'}")
         lines.append(f"    Client ID         : {settings.oidc_client_id or '(not set)'}")
+        lines.append(f"    Redirect URI      : {settings.oidc_redirect_uri or '(auto-detect)'}")
         lines.append(f"    Roles claim       : {settings.oidc_roles_claim}")
     else:
         lines.append(f"    IdP metadata URL  : {settings.saml_idp_metadata_url or '(not set)'}")
