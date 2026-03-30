@@ -30,6 +30,7 @@ services:
       context: ./backend
       target: development
     env_file: .env
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
     depends_on:
