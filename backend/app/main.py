@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import logging.config
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,45 @@ from app.routers.auth import router as auth_router
 from app.routers.schedules import router as schedules_router
 from app.routers.spotify import router as spotify_router
 from app.routers.users import router as users_router
+
+
+def _configure_logging() -> None:
+    """Configure root logging with timestamps and a level driven by LOG_LEVEL."""
+    log_level = settings.log_level.upper()
+    fmt = "%(asctime)s %(levelname)-8s %(name)s – %(message)s"
+    datefmt = "%Y-%m-%dT%H:%M:%S%z"
+    logging.config.dictConfig(
+        {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "timestamped": {
+                    "format": fmt,
+                    "datefmt": datefmt,
+                }
+            },
+            "handlers": {
+                "console": {
+                    "class": "logging.StreamHandler",
+                    "formatter": "timestamped",
+                }
+            },
+            "root": {
+                "handlers": ["console"],
+                "level": log_level,
+            },
+            # Keep uvicorn's own loggers at the same level so request lines also
+            # carry the configured verbosity.
+            "loggers": {
+                "uvicorn": {"handlers": ["console"], "level": log_level, "propagate": False},
+                "uvicorn.error": {"handlers": ["console"], "level": log_level, "propagate": False},
+                "uvicorn.access": {"handlers": ["console"], "level": log_level, "propagate": False},
+            },
+        }
+    )
+
+
+_configure_logging()
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +115,7 @@ def _log_startup() -> None:
         f"  |  refresh {settings.refresh_token_expire_days} days"
     )
 
+    lines.append(f"  Log level           : {settings.log_level.upper()}")
     lines.append(sep)
     logger.info("\n".join(lines))
 
