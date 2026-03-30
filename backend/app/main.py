@@ -59,6 +59,16 @@ _configure_logging()
 logger = logging.getLogger(__name__)
 
 
+def _sanitize(value: object) -> str:
+    """Return a single-line string safe for display in the startup banner.
+
+    Strips carriage returns and collapses embedded newlines to spaces so that
+    environment variable values with Windows CRLF endings (or other stray
+    control characters) do not corrupt the banner layout in terminal output.
+    """
+    return str(value).replace("\r", "").replace("\n", " ")
+
+
 def _log_startup() -> None:
     """Emit an INFO-level banner with non-sensitive startup configuration."""
     sep = "=" * 54
@@ -76,37 +86,43 @@ def _log_startup() -> None:
     provider = settings.auth_provider.upper()
     lines.append(f"  Authentication      : {provider}")
     if settings.auth_provider == "oidc":
-        lines.append(f"    Discovery URL     : {settings.oidc_discovery_url or '(not set)'}")
-        lines.append(f"    Client ID         : {settings.oidc_client_id or '(not set)'}")
-        lines.append(f"    Redirect URI      : {settings.oidc_redirect_uri or '(auto-detect)'}")
-        lines.append(f"    Roles claim       : {settings.oidc_roles_claim}")
+        disc = _sanitize(settings.oidc_discovery_url or "(not set)")
+        client_id = _sanitize(settings.oidc_client_id or "(not set)")
+        redir = _sanitize(settings.oidc_redirect_uri or "(auto-detect)")
+        lines.append(f"    Discovery URL     : {disc}")
+        lines.append(f"    Client ID         : {client_id}")
+        lines.append(f"    Redirect URI      : {redir}")
+        lines.append(f"    Roles claim       : {_sanitize(settings.oidc_roles_claim)}")
     else:
-        lines.append(f"    IdP metadata URL  : {settings.saml_idp_metadata_url or '(not set)'}")
-        lines.append(f"    SP entity ID      : {settings.saml_sp_entity_id or '(not set)'}")
-        lines.append(f"    SP ACS URL        : {settings.saml_sp_acs_url or '(not set)'}")
-        lines.append(f"    Roles attribute   : {settings.saml_roles_attribute}")
+        idp_meta = _sanitize(settings.saml_idp_metadata_url or "(not set)")
+        entity_id = _sanitize(settings.saml_sp_entity_id or "(not set)")
+        acs_url = _sanitize(settings.saml_sp_acs_url or "(not set)")
+        lines.append(f"    IdP metadata URL  : {idp_meta}")
+        lines.append(f"    SP entity ID      : {entity_id}")
+        lines.append(f"    SP ACS URL        : {acs_url}")
+        lines.append(f"    Roles attribute   : {_sanitize(settings.saml_roles_attribute)}")
 
     # ── Infrastructure ────────────────────────────────────────
-    lines.append(f"  Database            : {mask_url(settings.database_url)}")
-    lines.append(f"  Redis / broker      : {mask_url(settings.redis_url)}")
+    lines.append(f"  Database            : {_sanitize(mask_url(settings.database_url))}")
+    lines.append(f"  Redis / broker      : {_sanitize(mask_url(settings.redis_url))}")
 
     # ── Application ───────────────────────────────────────────
-    lines.append(f"  CORS origins        : {settings.backend_cors_origins}")
-    lines.append(f"  Frontend URL        : {settings.frontend_url}")
+    lines.append(f"  CORS origins        : {_sanitize(settings.backend_cors_origins)}")
+    lines.append(f"  Frontend URL        : {_sanitize(settings.frontend_url)}")
 
     # ── Spotify ───────────────────────────────────────────────
     spotify_configured = "yes" if settings.spotify_client_id else "no"
     lines.append("  Spotify")
-    lines.append(f"    Redirect URI      : {settings.spotify_redirect_uri}")
+    lines.append(f"    Redirect URI      : {_sanitize(settings.spotify_redirect_uri)}")
     lines.append(f"    Client configured : {spotify_configured}")
 
     # ── SMTP ──────────────────────────────────────────────────
     tls_label = "enabled" if settings.smtp_tls else "disabled"
     smtp_creds = "configured" if settings.smtp_password else "not set"
     lines.append("  SMTP")
-    smtp_host_info = f"{settings.smtp_host}:{settings.smtp_port}  (TLS: {tls_label})"
+    smtp_host_info = f"{_sanitize(settings.smtp_host)}:{settings.smtp_port}  (TLS: {tls_label})"
     lines.append(f"    Host              : {smtp_host_info}")
-    lines.append(f"    From              : {settings.smtp_from}")
+    lines.append(f"    From              : {_sanitize(settings.smtp_from)}")
     lines.append(f"    Credentials       : {smtp_creds}")
 
     # ── Token lifetimes ───────────────────────────────────────

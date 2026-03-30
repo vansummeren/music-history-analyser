@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 from authlib.jose import jwt
 from authlib.jose.errors import JoseError
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -114,6 +115,14 @@ async def pop_oidc_state(state: str, redis: Any) -> str | None:
 
 _oidc_discovery_cache: dict[str, Any] = {}
 
+# Timeout applied to all outbound IdP HTTP requests (connect / read / write / pool).
+_IDP_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
+
+
+def clear_oidc_discovery_cache() -> None:
+    """Remove all cached OIDC discovery documents (primarily for use in tests)."""
+    _oidc_discovery_cache.clear()
+
 
 async def fetch_oidc_discovery(discovery_url: str) -> dict[str, Any]:
     """Fetch (and cache in-process) the OIDC discovery document."""
@@ -122,10 +131,36 @@ async def fetch_oidc_discovery(discovery_url: str) -> dict[str, Any]:
         cached: dict[str, Any] = _oidc_discovery_cache[discovery_url]
         return cached
     logger.info("Fetching OIDC discovery document from %s", discovery_url)
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(discovery_url)
-        resp.raise_for_status()
-        doc: dict[str, Any] = resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=_IDP_TIMEOUT) as client:
+            resp = await client.get(discovery_url)
+            resp.raise_for_status()
+            doc: dict[str, Any] = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "OIDC discovery request failed: HTTP %s from %s",
+            exc.response.status_code,
+            discovery_url,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"Could not fetch OIDC discovery document from {discovery_url!r}: "
+                f"HTTP {exc.response.status_code}"
+            ),
+        ) from exc
+    except httpx.RequestError as exc:
+        logger.error(
+            "OIDC discovery request error for %s: %s",
+            discovery_url,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"Could not reach OIDC discovery URL {discovery_url!r}: {exc}"
+            ),
+        ) from exc
     _oidc_discovery_cache[discovery_url] = doc
     logger.debug("OIDC discovery document cached for %s", discovery_url)
     return doc
@@ -136,19 +171,38 @@ async def exchange_oidc_code(
 ) -> dict[str, Any]:
     """Exchange an authorization code for tokens at *token_endpoint*."""
     logger.info("Exchanging OIDC authorization code at %s", token_endpoint)
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
+    try:
+        async with httpx.AsyncClient(timeout=_IDP_TIMEOUT) as client:
+            resp = await client.post(
+                token_endpoint,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "client_id": settings.oidc_client_id,
+                    "client_secret": settings.oidc_client_secret,
+                },
+            )
+            resp.raise_for_status()
+            result: dict[str, Any] = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "OIDC token exchange failed: HTTP %s from %s",
+            exc.response.status_code,
             token_endpoint,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "client_id": settings.oidc_client_id,
-                "client_secret": settings.oidc_client_secret,
-            },
         )
-        resp.raise_for_status()
-        result: dict[str, Any] = resp.json()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"OIDC token exchange failed: HTTP {exc.response.status_code}"
+            ),
+        ) from exc
+    except httpx.RequestError as exc:
+        logger.error("OIDC token exchange request error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not reach OIDC token endpoint: {exc}",
+        ) from exc
     logger.debug("OIDC code exchange succeeded")
     return result
 
@@ -158,13 +212,32 @@ async def fetch_oidc_userinfo(
 ) -> dict[str, Any]:
     """Fetch userinfo from the IdP using *access_token*."""
     logger.debug("Fetching OIDC userinfo from %s", userinfo_endpoint)
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
+    try:
+        async with httpx.AsyncClient(timeout=_IDP_TIMEOUT) as client:
+            resp = await client.get(
+                userinfo_endpoint,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            resp.raise_for_status()
+            result: dict[str, Any] = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "OIDC userinfo request failed: HTTP %s from %s",
+            exc.response.status_code,
             userinfo_endpoint,
-            headers={"Authorization": f"Bearer {access_token}"},
         )
-        resp.raise_for_status()
-        result: dict[str, Any] = resp.json()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"OIDC userinfo request failed: HTTP {exc.response.status_code}"
+            ),
+        ) from exc
+    except httpx.RequestError as exc:
+        logger.error("OIDC userinfo request error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not reach OIDC userinfo endpoint: {exc}",
+        ) from exc
     return result
 
 
