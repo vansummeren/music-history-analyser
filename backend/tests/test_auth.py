@@ -4,11 +4,14 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import config as app_config
+from app.main import _sanitize
 from app.models.user import User
 from app.services import auth_service
 from tests.conftest import FakeRedis
@@ -415,7 +418,99 @@ async def test_oidc_login_scope_uses_percent_encoding(
     assert "openid+email+profile" not in location
 
 
-# ── 12. SAML ACS redirect — meta-refresh instead of inline script ─────────────
+# ── 13. OIDC discovery errors surface as 502 ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_oidc_login_discovery_error_returns_502(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+) -> None:
+    """When fetch_oidc_discovery raises HTTPException(502), the login endpoint
+    must pass that status code through to the caller.
+    """
+    original_disc = app_config.settings.oidc_discovery_url
+    app_config.settings.oidc_discovery_url = "https://idp.example.com/.well-known/openid-configuration"
+    try:
+        with patch(
+            "app.services.auth_service.fetch_oidc_discovery",
+            AsyncMock(side_effect=HTTPException(status_code=502, detail="IdP unreachable")),
+        ):
+            response = await client.get("/api/auth/oidc/login", follow_redirects=False)
+    finally:
+        app_config.settings.oidc_discovery_url = original_disc
+
+    assert response.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_fetch_oidc_discovery_http_status_error_raises_502() -> None:
+    """fetch_oidc_discovery must raise HTTPException(502) when the IdP
+    returns a non-2xx HTTP status.
+    """
+    discovery_url = "https://idp.example.com/.well-known/test-config"
+    auth_service.clear_oidc_discovery_cache()
+
+    mock_request = httpx.Request("GET", discovery_url)
+    mock_response = httpx.Response(503, request=mock_request)
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = httpx.HTTPStatusError(
+        "Service Unavailable", request=mock_request, response=mock_response
+    )
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_client
+    mock_cm.__aexit__.return_value = False
+
+    with (
+        patch("app.services.auth_service.httpx.AsyncClient", return_value=mock_cm),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await auth_service.fetch_oidc_discovery(discovery_url)
+
+    assert exc_info.value.status_code == 502
+    assert "503" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_fetch_oidc_discovery_network_error_raises_502() -> None:
+    """fetch_oidc_discovery must raise HTTPException(502) on network errors
+    (e.g. DNS failure, connection refused, timeout).
+    """
+    discovery_url = "https://idp.example.com/.well-known/test-network"
+    auth_service.clear_oidc_discovery_cache()
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = httpx.ConnectError("Connection refused")
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_client
+    mock_cm.__aexit__.return_value = False
+
+    with (
+        patch("app.services.auth_service.httpx.AsyncClient", return_value=mock_cm),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await auth_service.fetch_oidc_discovery(discovery_url)
+
+    assert exc_info.value.status_code == 502
+
+
+# ── 14. _sanitize helper strips control characters ────────────────────────────
+
+
+def test_sanitize_strips_carriage_return() -> None:
+    """_sanitize must remove \\r so CRLF env-var values don't corrupt the banner."""
+    assert _sanitize("https://example.com/\r") == "https://example.com/"
+
+
+def test_sanitize_collapses_embedded_newline() -> None:
+    """_sanitize must collapse \\n so multiline values stay on one banner line."""
+    assert _sanitize("line1\nline2") == "line1 line2"
+
+
+def test_sanitize_leaves_normal_strings_unchanged() -> None:
+    assert _sanitize("https://example.com/api") == "https://example.com/api"
+
 
 
 @pytest.mark.asyncio
