@@ -29,6 +29,9 @@ ENV APP_VERSION=${APP_VERSION} \
     BUILD_NUMBER=${BUILD_NUMBER} \
     BUILD_DATE=${BUILD_DATE}
 COPY . .
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
+    && chmod +x /app/entrypoint.sh
 USER appuser
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# entrypoint.sh runs `alembic upgrade head` then starts uvicorn, ensuring
+# the database schema is always up-to-date before traffic is accepted.
+CMD ["/app/entrypoint.sh"]
