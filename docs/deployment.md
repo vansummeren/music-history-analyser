@@ -102,11 +102,9 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-### 4. Run database migrations
-
-```bash
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
-```
+The backend container automatically runs `alembic upgrade head` at startup
+before serving requests, so the database schema is always kept up-to-date.
+You do **not** need to run migrations manually.
 
 ### 5. Ingress via Cloudflare Tunnel
 
@@ -124,8 +122,9 @@ The stack does not include a Cloudflare Tunnel container. To expose the applicat
 ```bash
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
 ```
+
+Migrations run automatically when the backend container restarts.
 
 ---
 

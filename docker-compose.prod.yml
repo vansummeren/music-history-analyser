@@ -79,6 +79,9 @@ services:
     image: ghcr.io/vansummeren/music-history-analyser-frontend:${IMAGE_TAG:-latest}
     ports:
       - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       - internal
     restart: unless-stopped
