@@ -80,7 +80,10 @@ async def oidc_login(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="OIDC is not configured",
         )
-    logger.debug("OIDC login initiated; fetching discovery document from %s", settings.oidc_discovery_url)
+    logger.debug(
+        "OIDC login initiated; fetching discovery document from %s",
+        settings.oidc_discovery_url,
+    )
     config = await auth_service.fetch_oidc_discovery(settings.oidc_discovery_url)
     state = secrets.token_hex(16)
     nonce = secrets.token_hex(16)
