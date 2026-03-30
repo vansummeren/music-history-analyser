@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import html as _html
+import logging
 import secrets
+import urllib.error
 import urllib.parse
 from typing import Any
 
@@ -22,6 +24,8 @@ from app.services import auth_service
 from app.services.rate_limit import rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 # ── Rate-limit dependency (20 requests / 60 s per IP) ────────────────────────
 
@@ -76,6 +80,7 @@ async def oidc_login(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="OIDC is not configured",
         )
+    logger.debug("OIDC login initiated; fetching discovery document from %s", settings.oidc_discovery_url)
     config = await auth_service.fetch_oidc_discovery(settings.oidc_discovery_url)
     state = secrets.token_hex(16)
     nonce = secrets.token_hex(16)
@@ -85,6 +90,7 @@ async def oidc_login(
     # reverse proxy).  Fall back to auto-detection only for local development where
     # no proxy is involved and request.url_for() is reliable.
     redirect_uri = settings.oidc_redirect_uri or str(request.url_for("oidc_callback"))
+    logger.debug("OIDC redirect_uri=%s", redirect_uri)
     auth_url = (
         f"{config['authorization_endpoint']}"
         f"?response_type=code"
@@ -94,6 +100,7 @@ async def oidc_login(
         f"&state={state}"
         f"&nonce={nonce}"
     )
+    logger.debug("Redirecting to OIDC authorization endpoint")
     return RedirectResponse(auth_url)
 
 
@@ -106,8 +113,10 @@ async def oidc_callback(
     redis: Any = Depends(get_redis),
 ) -> RedirectResponse:
     """Handle the OIDC authorization-code callback from the IdP."""
+    logger.debug("OIDC callback received; validating state")
     nonce = await auth_service.pop_oidc_state(state, redis)
     if nonce is None:
+        logger.warning("OIDC callback: invalid or expired state parameter")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired state parameter",
@@ -116,15 +125,18 @@ async def oidc_callback(
     config = await auth_service.fetch_oidc_discovery(settings.oidc_discovery_url)
     redirect_uri = settings.oidc_redirect_uri or str(request.url_for("oidc_callback"))
 
+    logger.debug("OIDC callback: exchanging authorization code for tokens")
     token_data = await auth_service.exchange_oidc_code(
         config["token_endpoint"], code, redirect_uri
     )
+    logger.debug("OIDC callback: fetching userinfo")
     userinfo = await auth_service.fetch_oidc_userinfo(
         config["userinfo_endpoint"], token_data["access_token"]
     )
 
     idp_roles = auth_service.extract_oidc_roles(userinfo)
     role = auth_service.resolve_role(idp_roles)
+    logger.debug("OIDC callback: resolved role=%s for sub=%s", role, userinfo.get("sub"))
 
     user = await auth_service.upsert_user(
         db,
@@ -137,6 +149,7 @@ async def oidc_callback(
 
     access_token = auth_service.create_access_token(user.id)
     refresh_token = await auth_service.create_refresh_token(user.id, redis)
+    logger.debug("OIDC login complete; redirecting to frontend callback")
     return RedirectResponse(_frontend_callback(access_token, refresh_token))
 
 
@@ -162,13 +175,56 @@ def _build_saml_auth(request_data: dict[str, Any]) -> Any:
 
     idp_data: dict[str, Any] = {}
     if settings.saml_idp_metadata_url:
-        idp_data = OneLogin_Saml2_IdPMetadataParser.parse_remote(
-            settings.saml_idp_metadata_url
-        )
+        logger.debug("Fetching SAML IdP metadata from %s", settings.saml_idp_metadata_url)
+        try:
+            idp_data = OneLogin_Saml2_IdPMetadataParser.parse_remote(
+                settings.saml_idp_metadata_url
+            )
+            logger.debug("SAML IdP metadata fetched successfully")
+        except urllib.error.HTTPError as exc:
+            logger.error(
+                "Failed to fetch SAML IdP metadata from %s: HTTP %s %s",
+                settings.saml_idp_metadata_url,
+                exc.code,
+                exc.reason,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    f"Could not retrieve SAML IdP metadata from "
+                    f"{settings.saml_idp_metadata_url!r}: "
+                    f"HTTP {exc.code} {exc.reason}"
+                ),
+            ) from exc
+        except urllib.error.URLError as exc:
+            logger.error(
+                "Failed to fetch SAML IdP metadata from %s: %s",
+                settings.saml_idp_metadata_url,
+                exc.reason,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    f"Could not reach SAML IdP metadata URL "
+                    f"{settings.saml_idp_metadata_url!r}: {exc.reason}"
+                ),
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "Unexpected error fetching SAML IdP metadata from %s",
+                settings.saml_idp_metadata_url,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    f"Unexpected error fetching SAML IdP metadata: {exc}"
+                ),
+            ) from exc
 
+    is_debug = settings.log_level.upper() == "DEBUG"
     saml_settings: dict[str, Any] = {
         "strict": True,
-        "debug": False,
+        "debug": is_debug,
         "sp": {
             "entityId": settings.saml_sp_entity_id,
             "assertionConsumerService": {
@@ -203,9 +259,11 @@ async def saml_login(request: Request) -> RedirectResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="SAML is not configured",
         )
+    logger.debug("SAML login initiated; building auth request")
     req = await _prepare_saml_request(request)
     auth = _build_saml_auth(req)
     login_url: str = auth.login()
+    logger.debug("SAML login: redirecting to IdP")
     return RedirectResponse(login_url)
 
 
@@ -220,12 +278,14 @@ async def saml_acs(
     Returns a self-submitting HTML page that stores the tokens and redirects to
     the frontend, because the IdP POST lands here (not on the frontend origin).
     """
+    logger.debug("SAML ACS: processing SAML response")
     req = await _prepare_saml_request(request)
     auth = _build_saml_auth(req)
     auth.process_response()
 
     errors = auth.get_errors()
     if errors:
+        logger.error("SAML ACS: authentication errors: %s", errors)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"SAML error: {', '.join(errors)}",
@@ -233,6 +293,7 @@ async def saml_acs(
 
     attributes: dict[str, Any] = auth.get_attributes()
     name_id: str = auth.get_nameid()
+    logger.debug("SAML ACS: authenticated name_id=%s", name_id)
 
     email_vals: list[str] = attributes.get("email", []) or attributes.get(
         "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress", []
@@ -243,6 +304,7 @@ async def saml_acs(
 
     idp_roles = auth_service.extract_saml_roles(attributes)
     role = auth_service.resolve_role(idp_roles)
+    logger.debug("SAML ACS: resolved role=%s", role)
 
     user = await auth_service.upsert_user(
         db,
@@ -256,6 +318,7 @@ async def saml_acs(
     access_token = auth_service.create_access_token(user.id)
     refresh_token = await auth_service.create_refresh_token(user.id, redis)
     callback_url = _frontend_callback(access_token, refresh_token)
+    logger.debug("SAML ACS: login complete; redirecting to frontend callback")
 
     # The IdP POSTs here, so a plain HTTP redirect response is not enough —
     # the browser will follow the redirect but the body won't reach the frontend.

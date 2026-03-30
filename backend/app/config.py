@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@example.com"
     smtp_tls: bool = True
 
+    # Logging
+    # Set to "DEBUG" to enable verbose log output for troubleshooting.
+    # Accepted values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_level: str = "INFO"
+
     # Build / version info (injected at image-build time via ARG → ENV)
     app_version: str = "0.1.0"
     build_number: str = "dev"
