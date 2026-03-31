@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import mask_url, settings
 from app.middleware import SecurityHeadersMiddleware
+from app.routers.admin import router as admin_router
 from app.routers.ai_configs import router as ai_configs_router
 from app.routers.analyses import router as analyses_router
 from app.routers.auth import router as auth_router
@@ -162,6 +163,7 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
 
+    app.include_router(admin_router)
     app.include_router(auth_router)
     app.include_router(users_router)
     app.include_router(spotify_router)
