@@ -64,13 +64,19 @@ async def link_spotify(
 
 @router.get("/callback")
 async def spotify_callback(
-    code: str,
     state: str,
     db: AsyncSession = Depends(get_db),
     redis: Any = Depends(get_redis),
+    code: str | None = None,
+    error: str | None = None,
 ) -> RedirectResponse:
-    """OAuth callback: exchange code → tokens, upsert SpotifyAccount, redirect."""
-    # Validate state
+    """OAuth callback: exchange code → tokens, upsert SpotifyAccount, redirect.
+
+    Handles both the success case (``code`` present) and the error case
+    (``error`` present, e.g. user denied the authorisation on Spotify).
+    """
+    # Always validate the state first so only legitimate OAuth flows can
+    # consume it (prevents state-exhaustion / CSRF replay attacks).
     raw = await redis.get(f"{_STATE_PREFIX}{state}")
     if raw is None:
         raise HTTPException(
@@ -80,10 +86,31 @@ async def spotify_callback(
     await redis.delete(f"{_STATE_PREFIX}{state}")
     user_id = uuid.UUID(raw.decode() if isinstance(raw, bytes) else raw)
 
+    # Spotify sent back an error (e.g. access_denied) — redirect to the
+    # frontend so it can show a user-friendly message.
+    if error is not None or code is None:
+        # Map to a fixed literal so no user-supplied data reaches the redirect URL.
+        if error == "access_denied":
+            safe_error = "access_denied"
+        elif error == "server_error":
+            safe_error = "server_error"
+        elif error == "temporarily_unavailable":
+            safe_error = "temporarily_unavailable"
+        elif error == "state_mismatch":
+            safe_error = "state_mismatch"
+        else:
+            safe_error = "unknown"
+        return RedirectResponse(
+            f"{settings.frontend_url}/spotify?error={safe_error}"
+        )
+
     # Exchange authorization code for tokens
     token_data = await exchange_code(code)
     access_token: str = token_data["access_token"]
-    refresh_token: str = token_data["refresh_token"]
+    # Spotify omits refresh_token on re-authorization of an already-approved app.
+    # For new accounts it is always present; for re-links we fall back to the
+    # existing stored token below.
+    refresh_token: str | None = token_data.get("refresh_token")
     expires_in: int = token_data.get("expires_in", 3600)
     scopes: str = token_data.get("scope", "")
     expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
@@ -95,9 +122,8 @@ async def spotify_callback(
     email_list: list[dict[str, Any]] = spotify_user.get("emails", [])
     email: str | None = email_list[0].get("email") if email_list else spotify_user.get("email")
 
-    # Encrypt tokens before storing
+    # Encrypt access token; refresh token is encrypted only when present.
     enc_access = crypto.encrypt(access_token)
-    enc_refresh = crypto.encrypt(refresh_token)
 
     # Upsert SpotifyAccount (one row per spotify_user_id)
     result = await db.execute(
@@ -106,24 +132,32 @@ async def spotify_callback(
     account = result.scalar_one_or_none()
 
     if account is None:
+        # Brand-new Spotify account — refresh_token is required.
+        if refresh_token is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Spotify did not return a refresh token",
+            )
         account = SpotifyAccount(
             user_id=user_id,
             spotify_user_id=spotify_user_id,
             display_name=display_name,
             email=email,
             encrypted_access_token=enc_access,
-            encrypted_refresh_token=enc_refresh,
+            encrypted_refresh_token=crypto.encrypt(refresh_token),
             token_expires_at=expires_at,
             scopes=scopes,
         )
         db.add(account)
     else:
-        # Re-link: update tokens and ownership
+        # Re-link: update tokens and ownership.
+        # Keep the stored refresh_token when Spotify doesn't issue a new one.
         account.user_id = user_id
         account.display_name = display_name
         account.email = email
         account.encrypted_access_token = enc_access
-        account.encrypted_refresh_token = enc_refresh
+        if refresh_token is not None:
+            account.encrypted_refresh_token = crypto.encrypt(refresh_token)
         account.token_expires_at = expires_at
         account.scopes = scopes
         account.updated_at = datetime.now(UTC)
