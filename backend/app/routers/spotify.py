@@ -1,12 +1,14 @@
 """Spotify OAuth and account-management router."""
 from __future__ import annotations
 
+import logging
 import secrets
 import urllib.parse
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
@@ -26,6 +28,8 @@ from app.services.music.spotify import (
     exchange_code,
     fetch_spotify_user,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/spotify", tags=["spotify"])
 
@@ -105,7 +109,15 @@ async def spotify_callback(
         )
 
     # Exchange authorization code for tokens
-    token_data = await exchange_code(code)
+    try:
+        token_data = await exchange_code(code)
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Spotify token exchange failed: %s", exc)
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=token_exchange_failed")
+    except httpx.RequestError as exc:
+        logger.warning("Spotify token exchange request error: %s", exc)
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=token_exchange_failed")
+
     access_token: str = token_data["access_token"]
     # Spotify omits refresh_token on re-authorization of an already-approved app.
     # For new accounts it is always present; for re-links we fall back to the
@@ -116,7 +128,14 @@ async def spotify_callback(
     expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
     # Fetch Spotify user profile
-    spotify_user = await fetch_spotify_user(access_token)
+    try:
+        spotify_user = await fetch_spotify_user(access_token)
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Spotify profile fetch failed: %s", exc)
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=profile_fetch_failed")
+    except httpx.RequestError as exc:
+        logger.warning("Spotify profile fetch request error: %s", exc)
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=profile_fetch_failed")
     spotify_user_id: str = spotify_user["id"]
     display_name: str | None = spotify_user.get("display_name")
     email_list: list[dict[str, Any]] = spotify_user.get("emails", [])
@@ -133,10 +152,18 @@ async def spotify_callback(
 
     if account is None:
         # Brand-new Spotify account — refresh_token is required.
+        # Spotify only issues refresh_token on the first authorization; if the
+        # account was previously linked and then unlinked, the user must revoke
+        # the app in Spotify settings (https://www.spotify.com/account/apps) and
+        # re-authorize to obtain a new refresh token.
         if refresh_token is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Spotify did not return a refresh token",
+            logger.warning(
+                "Spotify did not return a refresh token for new account '%s'; "
+                "user may need to revoke the app in Spotify settings",
+                spotify_user_id,
+            )
+            return RedirectResponse(
+                f"{settings.frontend_url}/spotify?error=no_refresh_token"
             )
         account = SpotifyAccount(
             user_id=user_id,

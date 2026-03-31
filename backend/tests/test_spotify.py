@@ -6,8 +6,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.spotify_account import SpotifyAccount
@@ -94,8 +96,6 @@ async def test_callback_stores_account(
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    from sqlalchemy import select
-
     user, _ = await _make_user(db_session, fake_redis)
     state = "test-state-xyz"
     await fake_redis.set(f"spotify_state:{state}", str(user.id))
@@ -157,8 +157,6 @@ async def test_callback_second_account_creates_new_row(
     fake_redis: FakeRedis,
 ) -> None:
     """Linking a second *different* Spotify account must create a new DB row."""
-    from sqlalchemy import select
-
     user, _ = await _make_user(db_session, fake_redis)
 
     # First account already in the DB.
@@ -300,6 +298,143 @@ async def test_callback_no_code_no_error_redirects_gracefully(
     assert "error=" in resp.headers["location"]
 
 
+@pytest.mark.asyncio
+async def test_callback_token_exchange_http_error_redirects(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+) -> None:
+    """An HTTP error from Spotify's token endpoint must redirect with an error, not crash."""
+    state = "state-exchange-fail"
+    await fake_redis.set(f"spotify_state:{state}", "00000000-0000-0000-0000-000000000000")
+
+    mock_request = httpx.Request("POST", "https://accounts.spotify.com/api/token")
+    mock_response = httpx.Response(400, request=mock_request)
+
+    with patch(
+        "app.routers.spotify.exchange_code",
+        AsyncMock(side_effect=httpx.HTTPStatusError("bad request", request=mock_request, response=mock_response)),
+    ):
+        resp = await client.get(
+            f"/api/spotify/callback?code=badcode&state={state}",
+            follow_redirects=False,
+        )
+
+    assert resp.status_code in (302, 307)
+    assert "error=token_exchange_failed" in resp.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_callback_token_exchange_network_error_redirects(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+) -> None:
+    """A network error during Spotify token exchange must redirect with an error, not crash."""
+    state = "state-exchange-net-fail"
+    await fake_redis.set(f"spotify_state:{state}", "00000000-0000-0000-0000-000000000000")
+
+    mock_request = httpx.Request("POST", "https://accounts.spotify.com/api/token")
+
+    with patch(
+        "app.routers.spotify.exchange_code",
+        AsyncMock(side_effect=httpx.ConnectTimeout("timed out", request=mock_request)),
+    ):
+        resp = await client.get(
+            f"/api/spotify/callback?code=slowcode&state={state}",
+            follow_redirects=False,
+        )
+
+    assert resp.status_code in (302, 307)
+    assert "error=token_exchange_failed" in resp.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_callback_profile_fetch_error_redirects(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+) -> None:
+    """An HTTP error when fetching the Spotify profile must redirect with an error, not crash."""
+    state = "state-profile-fail"
+    await fake_redis.set(f"spotify_state:{state}", "00000000-0000-0000-0000-000000000000")
+
+    token_response: dict[str, Any] = {
+        "access_token": "sp-access",
+        "refresh_token": "sp-refresh",
+        "expires_in": 3600,
+        "scope": "user-read-recently-played",
+    }
+    mock_request = httpx.Request("GET", "https://api.spotify.com/v1/me")
+    mock_response = httpx.Response(401, request=mock_request)
+
+    with (
+        patch(
+            "app.routers.spotify.exchange_code",
+            AsyncMock(return_value=token_response),
+        ),
+        patch(
+            "app.routers.spotify.fetch_spotify_user",
+            AsyncMock(side_effect=httpx.HTTPStatusError("unauthorized", request=mock_request, response=mock_response)),
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/callback?code=authcode&state={state}",
+            follow_redirects=False,
+        )
+
+    assert resp.status_code in (302, 307)
+    assert "error=profile_fetch_failed" in resp.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_callback_no_refresh_token_for_new_account_redirects(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """When Spotify omits refresh_token for a brand-new (or previously unlinked) account,
+    the callback must redirect to the frontend with error=no_refresh_token instead of
+    raising an HTTPException or crashing.
+    """
+    user, _ = await _make_user(db_session, fake_redis)
+    state = "state-no-refresh-new"
+    await fake_redis.set(f"spotify_state:{state}", str(user.id))
+
+    # Spotify response WITHOUT refresh_token for an account not in the DB.
+    token_response: dict[str, Any] = {
+        "access_token": "new-access-token",
+        # no "refresh_token" key
+        "expires_in": 3600,
+        "scope": "user-read-recently-played",
+    }
+    spotify_profile: dict[str, Any] = {
+        "id": "spotify-never-seen",
+        "display_name": "New User",
+        "email": "new@spotify.com",
+    }
+
+    with (
+        patch(
+            "app.routers.spotify.exchange_code",
+            AsyncMock(return_value=token_response),
+        ),
+        patch(
+            "app.routers.spotify.fetch_spotify_user",
+            AsyncMock(return_value=spotify_profile),
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/callback?code=authcode-no-refresh&state={state}",
+            follow_redirects=False,
+        )
+
+    assert resp.status_code in (302, 307)
+    assert "error=no_refresh_token" in resp.headers["location"]
+    # No account should have been created.
+    result = await db_session.execute(
+        select(SpotifyAccount).where(SpotifyAccount.spotify_user_id == "spotify-never-seen")
+    )
+    assert result.scalar_one_or_none() is None
+
+
 # ── 3. GET /api/spotify/accounts ─────────────────────────────────────────────
 
 
@@ -351,8 +486,6 @@ async def test_unlink_account(
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    from sqlalchemy import select
-
     user, token = await _make_user(db_session, fake_redis)
     account = await _make_spotify_account(db_session, user)
 
