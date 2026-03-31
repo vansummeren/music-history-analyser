@@ -150,6 +150,156 @@ async def test_callback_invalid_state_returns_400(
     assert resp.status_code == 400
 
 
+@pytest.mark.asyncio
+async def test_callback_second_account_creates_new_row(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Linking a second *different* Spotify account must create a new DB row."""
+    from sqlalchemy import select
+
+    user, _ = await _make_user(db_session, fake_redis)
+
+    # First account already in the DB.
+    await _make_spotify_account(db_session, user, spotify_user_id="spotify-first")
+
+    # Second OAuth flow for a different Spotify user.
+    state = "state-second-account"
+    await fake_redis.set(f"spotify_state:{state}", str(user.id))
+
+    token_response: dict[str, Any] = {
+        "access_token": "sp-access-2",
+        "refresh_token": "sp-refresh-2",
+        "expires_in": 3600,
+        "scope": "user-read-recently-played",
+    }
+    spotify_profile: dict[str, Any] = {
+        "id": "spotify-second",
+        "display_name": "Second Spotify User",
+        "email": "second@spotify.com",
+    }
+
+    with (
+        patch(
+            "app.routers.spotify.exchange_code",
+            AsyncMock(return_value=token_response),
+        ),
+        patch(
+            "app.routers.spotify.fetch_spotify_user",
+            AsyncMock(return_value=spotify_profile),
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/callback?code=authcode2&state={state}",
+            follow_redirects=False,
+        )
+
+    assert resp.status_code in (302, 307)
+
+    result = await db_session.execute(select(SpotifyAccount))
+    accounts = result.scalars().all()
+    assert len(accounts) == 2  # noqa: PLR2004
+    spotify_ids = {a.spotify_user_id for a in accounts}
+    assert spotify_ids == {"spotify-first", "spotify-second"}
+
+    second = next(a for a in accounts if a.spotify_user_id == "spotify-second")
+    assert second.user_id == user.id
+    assert second.display_name == "Second Spotify User"
+    assert second.email == "second@spotify.com"
+    assert crypto.decrypt(second.encrypted_access_token) == "sp-access-2"
+    assert crypto.decrypt(second.encrypted_refresh_token) == "sp-refresh-2"
+
+
+@pytest.mark.asyncio
+async def test_callback_relink_without_refresh_token_keeps_existing(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """When Spotify omits refresh_token on re-auth, the existing stored token is kept."""
+    user, _ = await _make_user(db_session, fake_redis)
+    account = await _make_spotify_account(db_session, user, spotify_user_id="spotify-relink")
+    original_enc_refresh = account.encrypted_refresh_token
+
+    state = "state-relink"
+    await fake_redis.set(f"spotify_state:{state}", str(user.id))
+
+    # Spotify response WITHOUT refresh_token (re-auth of already-approved app).
+    token_response: dict[str, Any] = {
+        "access_token": "new-access-token",
+        # no "refresh_token" key
+        "expires_in": 3600,
+        "scope": "user-read-recently-played",
+    }
+    spotify_profile: dict[str, Any] = {
+        "id": "spotify-relink",
+        "display_name": "Relink User",
+        "email": "relink@spotify.com",
+    }
+
+    with (
+        patch(
+            "app.routers.spotify.exchange_code",
+            AsyncMock(return_value=token_response),
+        ),
+        patch(
+            "app.routers.spotify.fetch_spotify_user",
+            AsyncMock(return_value=spotify_profile),
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/callback?code=authcode-relink&state={state}",
+            follow_redirects=False,
+        )
+
+    assert resp.status_code in (302, 307)
+
+    await db_session.refresh(account)
+    # Access token was updated.
+    assert crypto.decrypt(account.encrypted_access_token) == "new-access-token"
+    # Refresh token must be unchanged because Spotify did not return a new one.
+    assert account.encrypted_refresh_token == original_enc_refresh
+
+
+@pytest.mark.asyncio
+async def test_callback_error_param_redirects_to_frontend(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+) -> None:
+    """When Spotify sends ?error=access_denied the callback must redirect gracefully."""
+    state = "state-error"
+    await fake_redis.set(f"spotify_state:{state}", "00000000-0000-0000-0000-000000000000")
+
+    resp = await client.get(
+        f"/api/spotify/callback?error=access_denied&state={state}",
+        follow_redirects=False,
+    )
+
+    assert resp.status_code in (302, 307)
+    assert "error=access_denied" in resp.headers["location"]
+    # State must be consumed so it cannot be replayed.
+    assert await fake_redis.get(f"spotify_state:{state}") is None
+
+
+@pytest.mark.asyncio
+async def test_callback_no_code_no_error_redirects_gracefully(
+    client: AsyncClient,
+    fake_redis: FakeRedis,
+) -> None:
+    """Callback with only a state (no code, no error) redirects with an unknown error."""
+    state = "state-no-code"
+    await fake_redis.set(f"spotify_state:{state}", "00000000-0000-0000-0000-000000000000")
+
+    resp = await client.get(
+        f"/api/spotify/callback?state={state}",
+        follow_redirects=False,
+    )
+
+    assert resp.status_code in (302, 307)
+    assert "error=" in resp.headers["location"]
+
+
 # ── 3. GET /api/spotify/accounts ─────────────────────────────────────────────
 
 
