@@ -59,6 +59,22 @@ services:
     volumes:
       - ./backend:/app
 
+  beat:
+    build:
+      context: ./backend
+      target: development
+    env_file: .env
+    command: celery -A app.tasks.celery_app beat --loglevel=info --pidfile=/tmp/celerybeat.pid --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+    volumes:
+      - ./backend:/app
+
   frontend:
     build:
       context: ./frontend
