@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router-dom'
 import { BarChart2, Calendar, Cpu, LayoutDashboard, Music, ShieldCheck, X } from 'lucide-react'
-import { useAuth } from '../hooks/useAuth'
 
 interface Props {
   open: boolean
@@ -13,10 +12,10 @@ const navItems = [
   { to: '/ai-configs', icon: Cpu, label: 'AI Configs', end: false },
   { to: '/analyses', icon: BarChart2, label: 'Analyses', end: false },
   { to: '/schedules', icon: Calendar, label: 'Schedules', end: false },
+  { to: '/admin', icon: ShieldCheck, label: 'Diagnostics', end: false },
 ]
 
 export default function Sidebar({ open, onClose }: Props) {
-  const { user } = useAuth()
   return (
     <>
       {/* Mobile backdrop */}
@@ -70,25 +69,6 @@ export default function Sidebar({ open, onClose }: Props) {
                 </NavLink>
               </li>
             ))}
-            {user?.role === 'admin' && (
-              <li>
-                <NavLink
-                  to="/admin"
-                  end={false}
-                  onClick={onClose}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                      isActive
-                        ? 'bg-brand-50 text-brand-700 dark:bg-brand-700/50 dark:text-white'
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-brand-300 dark:hover:bg-brand-800 dark:hover:text-white'
-                    }`
-                  }
-                >
-                  <ShieldCheck className="h-4 w-4 shrink-0" />
-                  Admin
-                </NavLink>
-              </li>
-            )}
           </ul>
         </nav>
       </aside>

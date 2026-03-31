@@ -1,14 +1,15 @@
-"""Admin router — diagnostic endpoints for administrators."""
+"""Diagnostic router — connectivity test endpoints for all authenticated users."""
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import require_role
+from app.dependencies import get_current_user
 from app.models.ai_config import AIConfig
 from app.models.spotify_account import SpotifyAccount
 from app.models.user import User
@@ -44,7 +45,7 @@ def _get_ai_adapter(provider: str) -> AIProvider:
 @router.post("/test-email", response_model=TestEmailResponse)
 async def test_email(
     body: TestEmailRequest,
-    user: User = Depends(require_role("admin")),
+    user: User = Depends(get_current_user),
 ) -> TestEmailResponse:
     """Send a test email to verify that the SMTP configuration is working."""
     await send_test_email(recipient=body.recipient)
@@ -63,12 +64,12 @@ async def test_email(
 )
 async def test_spotify(
     account_id: uuid.UUID,
-    user: User = Depends(require_role("admin")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TestSpotifyResponse:
     """Fetch the 10 most recently played tracks for a Spotify account.
 
-    The account must belong to the authenticated admin user.
+    The account must belong to the authenticated user.
     """
     account = await db.get(SpotifyAccount, account_id)
     if account is None:
@@ -83,8 +84,6 @@ async def test_spotify(
 
     access_token = crypto.decrypt(account.encrypted_access_token)
     refresh_token = crypto.decrypt(account.encrypted_refresh_token)
-
-    from datetime import UTC, datetime
 
     now = datetime.now(UTC)
     expires_at = account.token_expires_at
@@ -125,12 +124,12 @@ async def test_spotify(
 async def test_ai(
     config_id: uuid.UUID,
     body: TestAIRequest,
-    user: User = Depends(require_role("admin")),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TestAIResponse:
     """Send a test prompt to the configured AI provider.
 
-    The AI config must belong to the authenticated admin user.
+    The AI config must belong to the authenticated user.
     """
     result = await db.execute(select(AIConfig).where(AIConfig.id == config_id))
     config = result.scalar_one_or_none()
@@ -149,7 +148,7 @@ async def test_ai(
     ai_result = await adapter.analyse(
         api_key=api_key,
         prompt=body.prompt,
-        track_list="(admin connectivity test — no tracks)",
+        track_list="(connectivity test — no tracks)",
     )
 
     return TestAIResponse(

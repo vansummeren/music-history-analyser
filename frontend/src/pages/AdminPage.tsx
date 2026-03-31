@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ShieldAlert } from 'lucide-react'
-import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
-import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../hooks/useToast'
 import type { AIConfig } from '../services/aiApi'
 import { getAIConfigs } from '../services/aiApi'
@@ -31,7 +28,6 @@ function ResultBox({ children }: { children: React.ReactNode }) {
 }
 
 export default function AdminPage() {
-  const { user } = useAuth()
   const { showToast } = useToast()
 
   const [spotifyAccounts, setSpotifyAccounts] = useState<SpotifyAccount[]>([])
@@ -75,16 +71,6 @@ export default function AdminPage() {
   useEffect(() => {
     loadAll()
   }, [loadAll])
-
-  if (user?.role !== 'admin') {
-    return (
-      <EmptyState
-        icon={<ShieldAlert className="h-10 w-10" />}
-        title="Access denied"
-        description="This page is only available to administrators."
-      />
-    )
-  }
 
   // ── Test Email ──────────────────────────────────────────────────────────────
 
@@ -151,7 +137,7 @@ export default function AdminPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Admin</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Diagnostics</h1>
 
       {loading ? (
         <LoadingSkeleton lines={4} />

@@ -1,11 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import Sidebar from './Sidebar'
-
-vi.mock('../hooks/useAuth', () => ({
-  useAuth: () => ({ user: null, loading: false, error: null, logout: vi.fn() }),
-}))
 
 function renderSidebar(open = true) {
   return render(
@@ -28,6 +24,7 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /AI Configs/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Analyses/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Schedules/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Diagnostics/i })).toBeInTheDocument()
   })
 
   it('renders the close button', () => {
@@ -42,10 +39,6 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /AI Configs/i })).toHaveAttribute('href', '/ai-configs')
     expect(screen.getByRole('link', { name: /Analyses/i })).toHaveAttribute('href', '/analyses')
     expect(screen.getByRole('link', { name: /Schedules/i })).toHaveAttribute('href', '/schedules')
-  })
-
-  it('does not show Admin link for non-admin users', () => {
-    renderSidebar()
-    expect(screen.queryByRole('link', { name: /Admin/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Diagnostics/i })).toHaveAttribute('href', '/admin')
   })
 })

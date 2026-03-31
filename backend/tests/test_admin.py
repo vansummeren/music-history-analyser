@@ -1,7 +1,8 @@
-"""Tests for admin endpoints."""
+"""Tests for diagnostic (admin) endpoints."""
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,36 +18,18 @@ from app.services.ai.base import AnalysisResult
 from app.services.music.base import Track
 from tests.conftest import FakeRedis
 
-from datetime import UTC, datetime, timedelta
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-async def _make_admin(
+async def _make_user(
     db: AsyncSession,
     redis: FakeRedis,
     *,
-    sub: str = "admin-sub",
+    sub: str = "test-sub",
+    email: str = "user@example.com",
 ) -> tuple[User, str]:
     user = await auth_service.upsert_user(
-        db, sub=sub, provider="oidc", email="admin@example.com", display_name="Admin"
-    )
-    user.role = "admin"
-    await db.commit()
-    await db.refresh(user)
-    token = auth_service.create_access_token(user.id)
-    return user, token
-
-
-async def _make_plain_user(
-    db: AsyncSession,
-    redis: FakeRedis,
-    *,
-    sub: str = "plain-sub",
-) -> tuple[User, str]:
-    user = await auth_service.upsert_user(
-        db, sub=sub, provider="oidc", email="user@example.com", display_name="User"
+        db, sub=sub, provider="oidc", email=email, display_name="Test User"
     )
     token = auth_service.create_access_token(user.id)
     return user, token
@@ -84,8 +67,10 @@ async def _make_ai_config(db: AsyncSession, user: User) -> AIConfig:
 
 def _smtp_ctx(sent: list[MIMEMultipart]) -> MagicMock:
     smtp_instance = AsyncMock()
+
     async def _send(msg: MIMEMultipart) -> None:
         sent.append(msg)
+
     smtp_instance.send_message = _send
     smtp_instance.login = AsyncMock()
     ctx = MagicMock()
@@ -98,13 +83,13 @@ def _smtp_ctx(sent: list[MIMEMultipart]) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_admin_test_email_sends_email(
+async def test_test_email_sends_email(
     client: AsyncClient,
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    """Admin can send a test email."""
-    _, token = await _make_admin(db_session, fake_redis)
+    """Any authenticated user can send a test email."""
+    _, token = await _make_user(db_session, fake_redis)
     sent: list[MIMEMultipart] = []
     with patch("app.services.email_service.aiosmtplib.SMTP", return_value=_smtp_ctx(sent)):
         resp = await client.post(
@@ -120,23 +105,7 @@ async def test_admin_test_email_sends_email(
 
 
 @pytest.mark.asyncio
-async def test_admin_test_email_blocked_for_plain_user(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    fake_redis: FakeRedis,
-) -> None:
-    """Non-admin users cannot use the test-email endpoint."""
-    _, token = await _make_plain_user(db_session, fake_redis)
-    resp = await client.post(
-        "/api/admin/test-email",
-        json={"recipient": "test@example.com"},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_admin_test_email_requires_auth(
+async def test_test_email_requires_auth(
     client: AsyncClient,
 ) -> None:
     """Unauthenticated requests are rejected with 401."""
@@ -148,14 +117,14 @@ async def test_admin_test_email_requires_auth(
 
 
 @pytest.mark.asyncio
-async def test_admin_test_spotify_returns_tracks(
+async def test_test_spotify_returns_tracks(
     client: AsyncClient,
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    """Admin can fetch recent Spotify tracks for their account."""
-    admin, token = await _make_admin(db_session, fake_redis)
-    account = await _make_spotify_account(db_session, admin)
+    """Authenticated user can fetch recent Spotify tracks for their account."""
+    user, token = await _make_user(db_session, fake_redis)
+    account = await _make_spotify_account(db_session, user)
 
     fake_tracks = [
         Track(title="Song A", artist="Artist A", album="Album A", played_at=datetime.now(UTC)),
@@ -178,13 +147,13 @@ async def test_admin_test_spotify_returns_tracks(
 
 
 @pytest.mark.asyncio
-async def test_admin_test_spotify_404_for_unknown_account(
+async def test_test_spotify_404_for_unknown_account(
     client: AsyncClient,
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
     """Returns 404 when the Spotify account does not exist."""
-    _, token = await _make_admin(db_session, fake_redis)
+    _, token = await _make_user(db_session, fake_redis)
     resp = await client.post(
         f"/api/admin/test-spotify/{uuid.uuid4()}",
         headers={"Authorization": f"Bearer {token}"},
@@ -193,50 +162,48 @@ async def test_admin_test_spotify_404_for_unknown_account(
 
 
 @pytest.mark.asyncio
-async def test_admin_test_spotify_403_for_other_users_account(
+async def test_test_spotify_403_for_other_users_account(
     client: AsyncClient,
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    """Admin cannot test a Spotify account that belongs to another user."""
-    admin, admin_token = await _make_admin(db_session, fake_redis)
-    other_user, _ = await _make_plain_user(db_session, fake_redis)
+    """User cannot test a Spotify account that belongs to another user."""
+    user, token = await _make_user(
+        db_session, fake_redis, sub="user-a", email="a@example.com"
+    )
+    other_user, _ = await _make_user(
+        db_session, fake_redis, sub="user-b", email="b@example.com"
+    )
     account = await _make_spotify_account(db_session, other_user)
 
     resp = await client.post(
         f"/api/admin/test-spotify/{account.id}",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_admin_test_spotify_blocked_for_plain_user(
+async def test_test_spotify_requires_auth(
     client: AsyncClient,
-    db_session: AsyncSession,
-    fake_redis: FakeRedis,
 ) -> None:
-    """Non-admin users cannot use the test-spotify endpoint."""
-    _, plain_token = await _make_plain_user(db_session, fake_redis)
-    resp = await client.post(
-        f"/api/admin/test-spotify/{uuid.uuid4()}",
-        headers={"Authorization": f"Bearer {plain_token}"},
-    )
-    assert resp.status_code == 403
+    """Unauthenticated requests are rejected with 401."""
+    resp = await client.post(f"/api/admin/test-spotify/{uuid.uuid4()}")
+    assert resp.status_code == 401
 
 
 # ── POST /api/admin/test-ai/{config_id} ──────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_admin_test_ai_returns_result(
+async def test_test_ai_returns_result(
     client: AsyncClient,
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    """Admin can send a test prompt to their configured AI provider."""
-    admin, token = await _make_admin(db_session, fake_redis)
-    config = await _make_ai_config(db_session, admin)
+    """Authenticated user can send a test prompt to their AI provider."""
+    user, token = await _make_user(db_session, fake_redis)
+    config = await _make_ai_config(db_session, user)
 
     fake_result = AnalysisResult(
         text="Hello! I am working correctly.",
@@ -263,13 +230,13 @@ async def test_admin_test_ai_returns_result(
 
 
 @pytest.mark.asyncio
-async def test_admin_test_ai_404_for_unknown_config(
+async def test_test_ai_404_for_unknown_config(
     client: AsyncClient,
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
     """Returns 404 when the AI config does not exist."""
-    _, token = await _make_admin(db_session, fake_redis)
+    _, token = await _make_user(db_session, fake_redis)
     resp = await client.post(
         f"/api/admin/test-ai/{uuid.uuid4()}",
         json={"prompt": "test"},
@@ -279,35 +246,35 @@ async def test_admin_test_ai_404_for_unknown_config(
 
 
 @pytest.mark.asyncio
-async def test_admin_test_ai_403_for_other_users_config(
+async def test_test_ai_403_for_other_users_config(
     client: AsyncClient,
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    """Admin cannot test an AI config that belongs to another user."""
-    admin, admin_token = await _make_admin(db_session, fake_redis)
-    other_user, _ = await _make_plain_user(db_session, fake_redis)
+    """User cannot test an AI config that belongs to another user."""
+    user, token = await _make_user(
+        db_session, fake_redis, sub="user-a", email="a@example.com"
+    )
+    other_user, _ = await _make_user(
+        db_session, fake_redis, sub="user-b", email="b@example.com"
+    )
     config = await _make_ai_config(db_session, other_user)
 
     resp = await client.post(
         f"/api/admin/test-ai/{config.id}",
         json={"prompt": "test"},
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_admin_test_ai_blocked_for_plain_user(
+async def test_test_ai_requires_auth(
     client: AsyncClient,
-    db_session: AsyncSession,
-    fake_redis: FakeRedis,
 ) -> None:
-    """Non-admin users cannot use the test-ai endpoint."""
-    _, plain_token = await _make_plain_user(db_session, fake_redis)
+    """Unauthenticated requests are rejected with 401."""
     resp = await client.post(
         f"/api/admin/test-ai/{uuid.uuid4()}",
         json={"prompt": "test"},
-        headers={"Authorization": f"Bearer {plain_token}"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 401
