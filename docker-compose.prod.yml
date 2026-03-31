@@ -78,6 +78,28 @@ services:
         limits:
           memory: 512m
 
+  beat:
+    image: ghcr.io/vansummeren/music-history-analyser-backend:${IMAGE_TAG:-latest}
+    env_file:
+      - ${STACK_ENV_FILE}
+    command: celery -A app.tasks.celery_app beat --loglevel=info --pidfile=/tmp/celerybeat.pid --schedule=/var/lib/celerybeat/celerybeat-schedule
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - internal
+    restart: unless-stopped
+    volumes:
+      - celerybeat_data:/var/lib/celerybeat
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
   frontend:
     image: ghcr.io/vansummeren/music-history-analyser-frontend:${IMAGE_TAG:-latest}
     env_file:
@@ -110,6 +132,12 @@ volumes:
       type: none
       o: bind
       device: ${DATA_PATH}/db
+  celerybeat_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH}/beat
 
 networks:
   internal:
