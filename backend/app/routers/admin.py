@@ -47,10 +47,10 @@ async def test_email(
     user: User = Depends(require_role("admin")),
 ) -> TestEmailResponse:
     """Send a test email to verify that the SMTP configuration is working."""
-    await send_test_email(recipient=str(body.recipient))
+    await send_test_email(recipient=body.recipient)
     return TestEmailResponse(
         message=f"Test email sent to {body.recipient}",
-        recipient=str(body.recipient),
+        recipient=body.recipient,
     )
 
 
