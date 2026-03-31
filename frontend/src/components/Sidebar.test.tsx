@@ -24,6 +24,7 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /AI Configs/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Analyses/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Schedules/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Diagnostics/i })).toBeInTheDocument()
   })
 
   it('renders the close button', () => {
@@ -38,5 +39,6 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /AI Configs/i })).toHaveAttribute('href', '/ai-configs')
     expect(screen.getByRole('link', { name: /Analyses/i })).toHaveAttribute('href', '/analyses')
     expect(screen.getByRole('link', { name: /Schedules/i })).toHaveAttribute('href', '/schedules')
+    expect(screen.getByRole('link', { name: /Diagnostics/i })).toHaveAttribute('href', '/admin')
   })
 })

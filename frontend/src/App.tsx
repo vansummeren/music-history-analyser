@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './hooks/useAuth'
 import { ToastProvider } from './hooks/useToast'
 import AIConfigPage from './pages/AIConfigPage'
+import AdminPage from './pages/AdminPage'
 import AnalysisPage from './pages/AnalysisPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
 import DashboardPage from './pages/DashboardPage'
@@ -37,6 +38,7 @@ export default function App() {
               element={<RunResultPage />}
             />
             <Route path="schedules" element={<SchedulesPage />} />
+            <Route path="admin" element={<AdminPage />} />
           </Route>
         </Routes>
       </ToastProvider>

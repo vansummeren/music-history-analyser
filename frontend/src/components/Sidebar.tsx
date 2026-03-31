@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { BarChart2, Calendar, Cpu, LayoutDashboard, Music, X } from 'lucide-react'
+import { BarChart2, Calendar, Cpu, LayoutDashboard, Music, ShieldCheck, X } from 'lucide-react'
 
 interface Props {
   open: boolean
@@ -12,6 +12,7 @@ const navItems = [
   { to: '/ai-configs', icon: Cpu, label: 'AI Configs', end: false },
   { to: '/analyses', icon: BarChart2, label: 'Analyses', end: false },
   { to: '/schedules', icon: Calendar, label: 'Schedules', end: false },
+  { to: '/admin', icon: ShieldCheck, label: 'Diagnostics', end: false },
 ]
 
 export default function Sidebar({ open, onClose }: Props) {
