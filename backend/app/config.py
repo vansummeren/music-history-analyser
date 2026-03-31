@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse, urlunparse
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,6 +53,11 @@ class Settings(BaseSettings):
 
     # Frontend URL (used to build post-auth redirect)
     frontend_url: str = "http://localhost:3000"
+
+    @field_validator("frontend_url", mode="before")
+    @classmethod
+    def _strip_trailing_slash(cls, v: str) -> str:
+        return v.rstrip("/")
 
     # Spotify
     spotify_client_id: str = ""

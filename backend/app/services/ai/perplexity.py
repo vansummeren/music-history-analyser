@@ -10,7 +10,7 @@ from app.services.ai.base import AIProvider, AnalysisResult
 logger = logging.getLogger(__name__)
 
 _PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions"
-_DEFAULT_MODEL = "llama-3.1-sonar-small-128k-online"
+_DEFAULT_MODEL = "sonar"
 
 
 class PerplexityAdapter(AIProvider):
