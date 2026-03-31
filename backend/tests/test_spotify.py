@@ -312,7 +312,11 @@ async def test_callback_token_exchange_http_error_redirects(
 
     with patch(
         "app.routers.spotify.exchange_code",
-        AsyncMock(side_effect=httpx.HTTPStatusError("bad request", request=mock_request, response=mock_response)),
+        AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "bad request", request=mock_request, response=mock_response
+            )
+        ),
     ):
         resp = await client.get(
             f"/api/spotify/callback?code=badcode&state={state}",
@@ -372,7 +376,11 @@ async def test_callback_profile_fetch_error_redirects(
         ),
         patch(
             "app.routers.spotify.fetch_spotify_user",
-            AsyncMock(side_effect=httpx.HTTPStatusError("unauthorized", request=mock_request, response=mock_response)),
+            AsyncMock(
+                side_effect=httpx.HTTPStatusError(
+                    "unauthorized", request=mock_request, response=mock_response
+                )
+            ),
         ),
     ):
         resp = await client.get(
