@@ -218,9 +218,10 @@ async def poll_account(db: AsyncSession, account_id: uuid.UUID) -> int:
         if most_recent.tzinfo is None:
             most_recent = most_recent.replace(tzinfo=UTC)
         # Only advance; never roll back the cursor
-        if account.last_polled_at is None or most_recent > account.last_polled_at.replace(
-            tzinfo=UTC
-        ):
+        last = account.last_polled_at
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        if last is None or most_recent > last:
             account.last_polled_at = most_recent
 
     account.updated_at = now

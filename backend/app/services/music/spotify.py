@@ -69,9 +69,7 @@ class SpotifyAdapter(MusicProvider):
                 for a in track_obj.get("artists", [])
                 if a.get("id")
             ]
-            artists_display = ", ".join(a.name for a in artist_objs) or ", ".join(
-                a.get("name", "") for a in track_obj.get("artists", [])
-            )
+            artists_display = ", ".join(a.name for a in artist_objs)
 
             # Build structured album object
             album_data = track_obj.get("album", {})

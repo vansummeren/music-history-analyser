@@ -393,37 +393,109 @@ async def get_play_events(
     )
     events = list(result.scalars().all())
 
-    # Enrich with track metadata (load tracks individually; avoids N+1 via explicit get)
-    output: list[PlayEventRead] = []
-    for event in events:
-        track = await db.get(Track, (event.track_provider, event.track_external_id))
-        track_title = track.title if track else ""
+    if not events:
+        return []
 
-        # Retrieve artist names via TrackArtist junction
-        track_artist = ""
-        if track is not None:
-            from app.models.listening_history import Artist, TrackArtist
+    # ── Batch-load all related entities to avoid N+1 queries ─────────────────
+    from app.models.listening_history import Album, Artist, TrackArtist
 
-            artist_result = await db.execute(
-                select(TrackArtist).where(
-                    TrackArtist.track_provider == event.track_provider,
-                    TrackArtist.track_external_id == event.track_external_id,
+    # Collect unique track keys from this page
+    track_keys = list({(e.track_provider, e.track_external_id) for e in events})
+
+    # 1. Fetch all tracks in one query (IN over composite values via OR)
+    from sqlalchemy import and_, or_
+
+    tracks_result = await db.execute(
+        select(Track).where(
+            or_(
+                and_(
+                    Track.provider == provider,
+                    Track.external_id == ext_id,
+                )
+                for provider, ext_id in track_keys
+            )
+        )
+    )
+    track_map: dict[tuple[str, str], Track] = {
+        (t.provider, t.external_id): t for t in tracks_result.scalars().all()
+    }
+
+    # 2. Fetch all TrackArtist junction rows for these tracks in one query
+    track_artists_result = await db.execute(
+        select(TrackArtist).where(
+            or_(
+                and_(
+                    TrackArtist.track_provider == provider,
+                    TrackArtist.track_external_id == ext_id,
+                )
+                for provider, ext_id in track_keys
+            )
+        )
+    )
+    all_links = list(track_artists_result.scalars().all())
+
+    # 3. Fetch all artists referenced by those junction rows in one query
+    artist_keys = list({(link.artist_provider, link.artist_external_id) for link in all_links})
+    artist_map: dict[tuple[str, str], Artist] = {}
+    if artist_keys:
+        artists_result = await db.execute(
+            select(Artist).where(
+                or_(
+                    and_(
+                        Artist.provider == provider,
+                        Artist.external_id == ext_id,
+                    )
+                    for provider, ext_id in artist_keys
                 )
             )
-            links = list(artist_result.scalars().all())
-            artist_names: list[str] = []
-            for link in links:
-                artist = await db.get(Artist, (link.artist_provider, link.artist_external_id))
-                if artist:
-                    artist_names.append(artist.name)
-            track_artist = ", ".join(artist_names)
+        )
+        artist_map = {
+            (a.provider, a.external_id): a for a in artists_result.scalars().all()
+        }
 
-        # Retrieve album title
+    # Build a mapping: track_key → sorted artist names
+    track_artist_names: dict[tuple[str, str], list[str]] = {k: [] for k in track_keys}
+    for link in all_links:
+        artist = artist_map.get((link.artist_provider, link.artist_external_id))
+        if artist:
+            track_artist_names[(link.track_provider, link.track_external_id)].append(artist.name)
+
+    # 4. Fetch all albums for the tracks in one query
+    album_keys = list(
+        {
+            (t.album_provider, t.album_external_id)
+            for t in track_map.values()
+            if t.album_provider and t.album_external_id
+        }
+    )
+    album_map: dict[tuple[str, str], Album] = {}
+    if album_keys:
+        albums_result = await db.execute(
+            select(Album).where(
+                or_(
+                    and_(
+                        Album.provider == provider,
+                        Album.external_id == ext_id,
+                    )
+                    for provider, ext_id in album_keys
+                )
+            )
+        )
+        album_map = {
+            (a.provider, a.external_id): a for a in albums_result.scalars().all()
+        }
+
+    # ── Assemble the response ─────────────────────────────────────────────────
+    output: list[PlayEventRead] = []
+    for event in events:
+        key = (event.track_provider, event.track_external_id)
+        track = track_map.get(key)
+
+        track_title = track.title if track else ""
+        track_artist = ", ".join(track_artist_names.get(key, []))
         track_album = ""
-        if track is not None and track.album_provider and track.album_external_id:
-            from app.models.listening_history import Album
-
-            album = await db.get(Album, (track.album_provider, track.album_external_id))
+        if track and track.album_provider and track.album_external_id:
+            album = album_map.get((track.album_provider, track.album_external_id))
             if album:
                 track_album = album.title
 
