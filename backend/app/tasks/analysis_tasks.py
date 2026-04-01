@@ -66,26 +66,35 @@ async def _run(schedule_id: uuid.UUID) -> dict[str, object]:  # noqa: PLR0911
             await schedule_service.mark_schedule_ran(db, schedule)
 
             if run.status == "failed":
+                error_msg = run.error or "Unknown error"
                 logger.error(
-                    "Scheduled analysis run %s failed: %s", run.id, run.error
+                    "Scheduled analysis run %s failed: %s", run.id, error_msg
                 )
-                return {"status": "failed", "run_id": str(run.id), "error": run.error}
+                result_text = f"⚠️ Analysis failed:\n\n{error_msg}"
+                return_value: dict[str, object] = {
+                    "status": "failed",
+                    "run_id": str(run.id),
+                    "error": error_msg,
+                }
+            else:
+                result_text = run.result_text or ""
+                return_value = {"status": "completed", "run_id": str(run.id)}
 
-            # Send the result email
+            # Always send the result email — include any error details in the body
             try:
                 await send_analysis_result(
                     recipient=schedule.recipient_email,
                     schedule_name=f"Schedule {schedule_id}",
                     analysis_name=analysis_name,
-                    result_text=run.result_text or "",
+                    result_text=result_text,
                     time_window_days=schedule.time_window_days,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "Failed to send email for schedule %s: %s", schedule_id, exc
                 )
-                # Don't fail the whole task — the analysis ran successfully
+                # Don't fail the whole task — the analysis result is already recorded
 
-            return {"status": "completed", "run_id": str(run.id)}
+            return return_value
     finally:
         await engine.dispose()

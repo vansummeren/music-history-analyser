@@ -1,6 +1,7 @@
-"""Tests for Session 05 — Email service."""
+"""Tests for Session 05 — Email service and scheduled analysis task."""
 from __future__ import annotations
 
+import uuid
 from email.mime.multipart import MIMEMultipart
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,6 +22,18 @@ def _mock_smtp_context(sent_messages: list[MIMEMultipart]) -> MagicMock:
     ctx.__aenter__ = AsyncMock(return_value=smtp_instance)
     ctx.__aexit__ = AsyncMock(return_value=False)
     return ctx
+
+
+def _plain_text(msg: MIMEMultipart) -> str:
+    """Extract the plain-text payload from a MIME message, handling both str and bytes."""
+    for part in msg.walk():
+        if part.get_content_type() == "text/plain":
+            raw = part.get_payload(decode=True)
+            if isinstance(raw, bytes):
+                return raw.decode()
+            # Already decoded (e.g. 7bit encoding)
+            return part.get_payload() or ""
+    return ""
 
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
@@ -68,11 +81,7 @@ async def test_send_analysis_result_includes_result_text() -> None:
 
     msg = sent[0]
     # Walk the MIME parts and find the plain text payload
-    plain_payload = ""
-    for part in msg.walk():
-        if part.get_content_type() == "text/plain":
-            plain_payload = part.get_payload()
-            break
+    plain_payload = _plain_text(msg)
     assert "Heavy metal phase detected." in plain_payload
 
 
@@ -137,3 +146,114 @@ async def test_send_analysis_result_propagates_smtp_error() -> None:
             result_text="text",
             time_window_days=7,
         )
+
+
+# ── Scheduled analysis task: email always sent ────────────────────────────────
+
+
+def _make_run(
+    *, status: str, result_text: str | None = None, error: str | None = None
+) -> MagicMock:
+    """Return a fake AnalysisRun-like object."""
+    run = MagicMock()
+    run.id = uuid.uuid4()
+    run.status = status
+    run.result_text = result_text
+    run.error = error
+    return run
+
+
+def _make_schedule(*, schedule_id: uuid.UUID, analysis_id: uuid.UUID) -> MagicMock:
+    schedule = MagicMock()
+    schedule.id = schedule_id
+    schedule.analysis_id = analysis_id
+    schedule.is_active = True
+    schedule.recipient_email = "user@example.com"
+    schedule.time_window_days = 7
+    return schedule
+
+
+def _make_analysis(*, analysis_id: uuid.UUID) -> MagicMock:
+    analysis = MagicMock()
+    analysis.id = analysis_id
+    analysis.name = "My Analysis"
+    return analysis
+
+
+@pytest.mark.asyncio
+async def test_run_scheduled_analysis_sends_email_on_failure() -> None:
+    """An email must be sent even when the analysis run has status='failed'."""
+    from app.tasks.analysis_tasks import _run
+
+    schedule_id = uuid.uuid4()
+    analysis_id = uuid.uuid4()
+    schedule = _make_schedule(schedule_id=schedule_id, analysis_id=analysis_id)
+    analysis = _make_analysis(analysis_id=analysis_id)
+    run = _make_run(
+        status="failed",
+        error="Spotify account is missing required scope(s): user-top-read.",
+    )
+
+    sent: list[MIMEMultipart] = []
+    smtp_ctx = _mock_smtp_context(sent)
+
+    mock_db = AsyncMock()
+    mock_db.get = AsyncMock(side_effect=[schedule, analysis])
+    session_ctx = MagicMock()
+    session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_engine = AsyncMock()
+    mock_session_maker = MagicMock(return_value=session_ctx)
+
+    with (
+        patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine),
+        patch("sqlalchemy.ext.asyncio.async_sessionmaker", return_value=mock_session_maker),
+        patch("app.services.analysis_service.run_analysis", new=AsyncMock(return_value=run)),
+        patch("app.services.schedule_service.mark_schedule_ran", new=AsyncMock()),
+        patch("app.services.email_service.aiosmtplib.SMTP", return_value=smtp_ctx),
+    ):
+        result = await _run(schedule_id)
+
+    assert result["status"] == "failed"
+    assert len(sent) == 1, "Expected exactly one email to be sent on failure"
+    msg = sent[0]
+    assert "user-top-read" in _plain_text(msg)
+
+
+@pytest.mark.asyncio
+async def test_run_scheduled_analysis_sends_email_on_success() -> None:
+    """An email must be sent when the analysis run has status='completed'."""
+    from app.tasks.analysis_tasks import _run
+
+    schedule_id = uuid.uuid4()
+    analysis_id = uuid.uuid4()
+    schedule = _make_schedule(schedule_id=schedule_id, analysis_id=analysis_id)
+    analysis = _make_analysis(analysis_id=analysis_id)
+    run = _make_run(status="completed", result_text="You love jazz.")
+
+    sent: list[MIMEMultipart] = []
+    smtp_ctx = _mock_smtp_context(sent)
+
+    mock_db = AsyncMock()
+    mock_db.get = AsyncMock(side_effect=[schedule, analysis])
+    session_ctx = MagicMock()
+    session_ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    session_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_engine = AsyncMock()
+    mock_session_maker = MagicMock(return_value=session_ctx)
+
+    with (
+        patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine),
+        patch("sqlalchemy.ext.asyncio.async_sessionmaker", return_value=mock_session_maker),
+        patch("app.services.analysis_service.run_analysis", new=AsyncMock(return_value=run)),
+        patch("app.services.schedule_service.mark_schedule_ran", new=AsyncMock()),
+        patch("app.services.email_service.aiosmtplib.SMTP", return_value=smtp_ctx),
+    ):
+        result = await _run(schedule_id)
+
+    assert result["status"] == "completed"
+    assert len(sent) == 1, "Expected exactly one email to be sent on success"
+    msg = sent[0]
+    assert "You love jazz." in _plain_text(msg)
