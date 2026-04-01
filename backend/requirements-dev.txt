@@ -4,5 +4,6 @@ httpx==0.28.1
 pytest-cov==6.0.0
 ruff==0.9.1
 mypy==1.14.1
+types-Markdown==3.10.2.20260211
 pip-audit==2.7.3
 aiosqlite==0.20.0
