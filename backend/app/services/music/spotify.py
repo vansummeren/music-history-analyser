@@ -224,7 +224,12 @@ class SpotifyAdapter(MusicProvider):
 
 async def exchange_code(code: str) -> dict[str, Any]:
     """Exchange an authorization code for tokens at the Spotify token endpoint."""
-    logger.info("Exchanging Spotify authorization code")
+    logger.info("Exchanging Spotify authorization code at %s/api/token", _SPOTIFY_ACCOUNTS_BASE)
+    logger.debug(
+        "Spotify code exchange: redirect_uri=%s, client_id=%s",
+        settings.spotify_redirect_uri,
+        settings.spotify_client_id,
+    )
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{_SPOTIFY_ACCOUNTS_BASE}/api/token",
@@ -237,21 +242,29 @@ async def exchange_code(code: str) -> dict[str, Any]:
             },
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
+        logger.debug(
+            "Spotify code exchange response: status=%d", resp.status_code
+        )
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
-    logger.debug("Spotify authorization code exchange succeeded")
+    logger.debug(
+        "Spotify authorization code exchange succeeded; response keys: %s",
+        list(result.keys()),
+    )
     return result
 
 
 async def fetch_spotify_user(access_token: str) -> dict[str, Any]:
     """Fetch the Spotify user profile for *access_token*."""
-    logger.debug("Fetching Spotify user profile")
+    logger.debug("Fetching Spotify user profile from %s/me", _SPOTIFY_API_BASE)
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{_SPOTIFY_API_BASE}/me",
             headers={"Authorization": f"Bearer {access_token}"},
         )
+        logger.debug("Spotify user profile response: status=%d", resp.status_code)
         resp.raise_for_status()
         result: dict[str, Any] = resp.json()
     logger.info("Spotify user profile fetched — id: %s", result.get("id", "unknown"))
+    logger.debug("Spotify user profile keys: %s", list(result.keys()))
     return result
