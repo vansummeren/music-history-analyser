@@ -270,8 +270,15 @@ async def get_history(
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=UTC)
     if expires_at <= now:
-        adapter = SpotifyAdapter()
-        access_token, new_refresh, new_expires = await adapter.refresh_token(refresh_token)
+        try:
+            adapter = SpotifyAdapter()
+            access_token, new_refresh, new_expires = await adapter.refresh_token(refresh_token)
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            logger.warning("Spotify token refresh failed for account %s: %s", account_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not refresh Spotify token. Please re-link your account.",
+            ) from exc
         account.encrypted_access_token = crypto.encrypt(access_token)
         account.encrypted_refresh_token = crypto.encrypt(new_refresh)
         account.token_expires_at = new_expires
@@ -279,8 +286,15 @@ async def get_history(
         await db.commit()
 
     after = now - timedelta(days=time_window)
-    adapter = SpotifyAdapter()
-    tracks = await adapter.get_recently_played(access_token, after=after, limit=50)
+    try:
+        adapter = SpotifyAdapter()
+        tracks = await adapter.get_recently_played(access_token, after=after, limit=50)
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+        logger.warning("Spotify history fetch failed for account %s: %s", account_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not fetch listening history from Spotify. Please try again later.",
+        ) from exc
 
     return [
         TrackRead(
