@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -23,6 +23,19 @@ class SpotifyAccount(Base):
     encrypted_refresh_token: Mapped[str] = mapped_column(Text)
     token_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     scopes: Mapped[str] = mapped_column(Text, default="")
+
+    # ── Polling configuration ──────────────────────────────────────────────────
+    # How often (in minutes) to automatically poll recently-played history.
+    # Default: 60 minutes.  Range enforced in the API layer (1–1440).
+    poll_interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    # Set to False to pause automatic polling for this account without deleting it.
+    polling_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Timestamp of the last successful poll (used as the ``after`` cursor for the
+    # Spotify recently-played endpoint to avoid re-importing duplicate events).
+    last_polled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

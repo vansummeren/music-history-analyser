@@ -17,10 +17,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.listening_history import PlayEvent, Track
 from app.models.spotify_account import SpotifyAccount
 from app.models.user import User
 from app.redis_client import get_redis
-from app.schemas.spotify import SpotifyAccountRead, SpotifyLinkResponse, TrackRead
+from app.schemas.spotify import (
+    PlayEventRead,
+    SpotifyAccountPollUpdate,
+    SpotifyAccountRead,
+    SpotifyLinkResponse,
+    TrackRead,
+)
 from app.services import crypto
 from app.services.music.spotify import (
     SPOTIFY_SCOPES,
@@ -284,3 +291,234 @@ async def get_history(
         )
         for t in tracks
     ]
+
+
+# ── Polling configuration ─────────────────────────────────────────────────────
+
+
+@router.patch("/accounts/{account_id}", response_model=SpotifyAccountRead)
+async def update_poll_config(
+    account_id: uuid.UUID,
+    payload: SpotifyAccountPollUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SpotifyAccount:
+    """Update the polling configuration for a linked Spotify account.
+
+    Accepts ``poll_interval_minutes`` (1–1440) and/or ``polling_enabled``
+    to configure how often automatic history polling runs for this account.
+    """
+    account = await db.get(SpotifyAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if account.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this account",
+        )
+
+    if payload.poll_interval_minutes is not None:
+        account.poll_interval_minutes = payload.poll_interval_minutes
+    if payload.polling_enabled is not None:
+        account.polling_enabled = payload.polling_enabled
+    account.updated_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(account)
+    return account
+
+
+@router.post(
+    "/accounts/{account_id}/poll",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=dict[str, object],
+)
+async def trigger_poll(
+    account_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, object]:
+    """Manually trigger a history poll for a linked Spotify account.
+
+    Dispatches a Celery task and returns immediately.  The task runs
+    asynchronously — check the account's ``last_polled_at`` field to
+    confirm completion.
+    """
+    account = await db.get(SpotifyAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if account.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to poll this account",
+        )
+
+    from app.tasks.celery_app import celery_app as _celery
+
+    _celery.send_task("poll_history_for_account", args=[str(account_id)])
+    logger.info("Manual poll dispatched for account %s by user %s", account_id, user.id)
+    return {"queued": True, "account_id": str(account_id)}
+
+
+# ── Play events (shadow DB history) ──────────────────────────────────────────
+
+
+@router.get("/accounts/{account_id}/play-events", response_model=list[PlayEventRead])
+async def get_play_events(
+    account_id: uuid.UUID,
+    limit: int = Query(default=100, ge=1, le=500, description="Maximum number of events"),
+    offset: int = Query(default=0, ge=0, description="Pagination offset"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[PlayEventRead]:
+    """Return stored play events for a linked Spotify account from the shadow DB.
+
+    Results are ordered by ``played_at`` descending (most recent first).
+    Access is restricted to the account owner.
+    """
+    account = await db.get(SpotifyAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    if account.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this account",
+        )
+
+    result = await db.execute(
+        select(PlayEvent)
+        .where(PlayEvent.streaming_account_id == account_id)
+        .order_by(PlayEvent.played_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    events = list(result.scalars().all())
+
+    if not events:
+        return []
+
+    # ── Batch-load all related entities to avoid N+1 queries ─────────────────
+    from app.models.listening_history import Album, Artist, TrackArtist
+
+    # Collect unique track keys from this page
+    track_keys = list({(e.track_provider, e.track_external_id) for e in events})
+
+    # 1. Fetch all tracks in one query (IN over composite values via OR)
+    from sqlalchemy import and_, or_
+
+    tracks_result = await db.execute(
+        select(Track).where(
+            or_(
+                *(
+                    and_(
+                        Track.provider == provider,
+                        Track.external_id == ext_id,
+                    )
+                    for provider, ext_id in track_keys
+                )
+            )
+        )
+    )
+    track_map: dict[tuple[str, str], Track] = {
+        (t.provider, t.external_id): t for t in tracks_result.scalars().all()
+    }
+
+    # 2. Fetch all TrackArtist junction rows for these tracks in one query
+    track_artists_result = await db.execute(
+        select(TrackArtist).where(
+            or_(
+                *(
+                    and_(
+                        TrackArtist.track_provider == provider,
+                        TrackArtist.track_external_id == ext_id,
+                    )
+                    for provider, ext_id in track_keys
+                )
+            )
+        )
+    )
+    all_links = list(track_artists_result.scalars().all())
+
+    # 3. Fetch all artists referenced by those junction rows in one query
+    artist_keys = list({(link.artist_provider, link.artist_external_id) for link in all_links})
+    artist_map: dict[tuple[str, str], Artist] = {}
+    if artist_keys:
+        artists_result = await db.execute(
+            select(Artist).where(
+                or_(
+                    *(
+                        and_(
+                            Artist.provider == provider,
+                            Artist.external_id == ext_id,
+                        )
+                        for provider, ext_id in artist_keys
+                    )
+                )
+            )
+        )
+        artist_map = {
+            (a.provider, a.external_id): a for a in artists_result.scalars().all()
+        }
+
+    # Build a mapping: track_key → sorted artist names
+    track_artist_names: dict[tuple[str, str], list[str]] = {k: [] for k in track_keys}
+    for link in all_links:
+        artist = artist_map.get((link.artist_provider, link.artist_external_id))
+        if artist:
+            track_artist_names[(link.track_provider, link.track_external_id)].append(artist.name)
+
+    # 4. Fetch all albums for the tracks in one query
+    album_keys = list(
+        {
+            (t.album_provider, t.album_external_id)
+            for t in track_map.values()
+            if t.album_provider and t.album_external_id
+        }
+    )
+    album_map: dict[tuple[str, str], Album] = {}
+    if album_keys:
+        albums_result = await db.execute(
+            select(Album).where(
+                or_(
+                    *(
+                        and_(
+                            Album.provider == provider,
+                            Album.external_id == ext_id,
+                        )
+                        for provider, ext_id in album_keys
+                    )
+                )
+            )
+        )
+        album_map = {
+            (a.provider, a.external_id): a for a in albums_result.scalars().all()
+        }
+
+    # ── Assemble the response ─────────────────────────────────────────────────
+    output: list[PlayEventRead] = []
+    for event in events:
+        key = (event.track_provider, event.track_external_id)
+        track = track_map.get(key)
+
+        track_title = track.title if track else ""
+        track_artist = ", ".join(track_artist_names.get(key, []))
+        track_album = ""
+        if track and track.album_provider and track.album_external_id:
+            album = album_map.get((track.album_provider, track.album_external_id))
+            if album:
+                track_album = album.title
+
+        output.append(
+            PlayEventRead(
+                id=event.id,
+                streaming_account_id=event.streaming_account_id,
+                track_provider=event.track_provider,
+                track_external_id=event.track_external_id,
+                played_at=event.played_at,
+                created_at=event.created_at,
+                track_title=track_title,
+                track_artist=track_artist,
+                track_album=track_album,
+            )
+        )
+
+    return output
