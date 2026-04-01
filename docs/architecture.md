@@ -102,29 +102,21 @@ exposes only a single HTTP port; TLS termination lives outside the stack.
 
 ## Data Model (high level)
 
+The full schema — all tables, columns, data types, keys, and constraints — is documented in
+[`docs/database.md`](database.md).
+
+A brief overview of the main entities:
+
 ```
 users
-  id · email · display_name · created_at · last_login_at
-
-spotify_accounts
-  id · user_id (FK) · spotify_user_id · display_name
-  access_token (encrypted) · refresh_token (encrypted) · token_expires_at · linked_at
-
-ai_configs
-  id · user_id (FK) · provider · api_key (encrypted) · display_name · created_at
-
-analyses
-  id · user_id (FK) · spotify_account_id (FK) · ai_config_id (FK)
-  prompt · display_name · created_at
-
-schedules
-  id · analysis_id (FK) · cron_expression · time_window · recipient_email
-  is_active · last_run_at · next_run_at · created_at
-
-analysis_runs
-  id · schedule_id (FK, nullable) · analysis_id (FK)
-  status (pending/running/completed/failed)
-  result_text · error_message · started_at · finished_at
+ ├── spotify_accounts (OAuth tokens encrypted, polling config)
+ │    └── play_events  ──→  tracks ──→ albums
+ │                                └──→ track_artists ──→ artists
+ ├── ai_configs (API keys encrypted)
+ ├── analyses (prompt + provider pair)
+ │    ├── analysis_runs (execution results, token counts)
+ │    └── schedules (cron-based recurring runs)
+ └── schedules
 ```
 
 Sensitive values (tokens, API keys) are encrypted at rest using `cryptography.fernet`
