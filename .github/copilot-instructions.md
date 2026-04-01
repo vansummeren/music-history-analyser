@@ -55,3 +55,13 @@ The CI workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 | **npm audit** | Scans JS deps for known vulnerabilities |
 
 All lint and test jobs **must pass** before merging.
+
+## Versioning
+
+The project follows [Semantic Versioning](https://semver.org/). **With every PR, always increase the patch version** (e.g. `1.0.0` → `1.0.1`) in all three places:
+
+1. `frontend/package.json` — `"version"` field
+2. `backend/app/config.py` — `app_version` default value
+3. `backend/Dockerfile` — `ARG APP_VERSION` default value
+
+All three values must stay in sync.
