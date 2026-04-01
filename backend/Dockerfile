@@ -30,7 +30,9 @@ ENV APP_VERSION=${APP_VERSION} \
     BUILD_DATE=${BUILD_DATE}
 COPY . .
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
-    && chmod +x /app/entrypoint.sh
+    && chmod +x /app/entrypoint.sh \
+    && mkdir -p /var/lib/celerybeat \
+    && chown appuser:appgroup /var/lib/celerybeat
 USER appuser
 # entrypoint.sh runs `alembic upgrade head` then starts uvicorn, ensuring
 # the database schema is always up-to-date before traffic is accepted.
