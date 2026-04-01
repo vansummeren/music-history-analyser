@@ -441,3 +441,153 @@ async def test_get_run_not_found(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 404
+
+
+# ── 7. Partial failure resilience ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_succeeds_when_top_tracks_fail(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Analysis should still complete when fetching top tracks fails."""
+    user, token = await _make_user(db_session, fake_redis, sub="sub-partial-tracks")
+    account = await _make_spotify_account(db_session, user)
+    ai_config = await _make_ai_config(db_session, user)
+    analysis = await _make_analysis(db_session, user, account, ai_config)
+
+    mock_artists = [
+        TopArtist(external_id="artist-a", name="Artist A", genres=["pop"]),
+    ]
+    mock_result = AnalysisResult(
+        text="Based on your artists, you enjoy pop.",
+        model="claude-3-5-haiku-20241022",
+        input_tokens=80,
+        output_tokens=40,
+    )
+
+    with (
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_tracks",
+            AsyncMock(side_effect=Exception("Spotify tracks API error")),
+        ),
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_artists",
+            AsyncMock(return_value=mock_artists),
+        ),
+        patch(
+            "app.services.analysis_service.ClaudeAdapter.analyse",
+            AsyncMock(return_value=mock_result),
+        ),
+    ):
+        resp = await client.post(
+            f"/api/analyses/{analysis.id}/run",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert "Could not fetch top tracks" in data["result_text"]
+    assert "Based on your artists" in data["result_text"]
+
+
+@pytest.mark.asyncio
+async def test_run_succeeds_when_top_artists_fail(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Analysis should still complete when fetching top artists fails."""
+    user, token = await _make_user(db_session, fake_redis, sub="sub-partial-artists")
+    account = await _make_spotify_account(db_session, user)
+    ai_config = await _make_ai_config(db_session, user)
+    analysis = await _make_analysis(db_session, user, account, ai_config)
+
+    mock_tracks = [
+        TopTrack(
+            external_id="track-a",
+            title="Song A",
+            artist="Artist A",
+            album="Album A",
+        ),
+    ]
+    mock_result = AnalysisResult(
+        text="Based on your tracks, you enjoy rock.",
+        model="claude-3-5-haiku-20241022",
+        input_tokens=80,
+        output_tokens=40,
+    )
+
+    with (
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_tracks",
+            AsyncMock(return_value=mock_tracks),
+        ),
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_artists",
+            AsyncMock(side_effect=Exception("Spotify artists API error")),
+        ),
+        patch(
+            "app.services.analysis_service.ClaudeAdapter.analyse",
+            AsyncMock(return_value=mock_result),
+        ),
+    ):
+        resp = await client.post(
+            f"/api/analyses/{analysis.id}/run",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert "Could not fetch top artists" in data["result_text"]
+    assert "Based on your tracks" in data["result_text"]
+
+
+@pytest.mark.asyncio
+async def test_run_succeeds_when_both_fetches_fail_but_ai_succeeds(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Analysis should still complete even if both data fetches fail."""
+    user, token = await _make_user(db_session, fake_redis, sub="sub-partial-both")
+    account = await _make_spotify_account(db_session, user)
+    ai_config = await _make_ai_config(db_session, user)
+    analysis = await _make_analysis(db_session, user, account, ai_config)
+
+    mock_result = AnalysisResult(
+        text="Not enough data for a full analysis.",
+        model="claude-3-5-haiku-20241022",
+        input_tokens=40,
+        output_tokens=20,
+    )
+
+    with (
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_tracks",
+            AsyncMock(side_effect=Exception("tracks error")),
+        ),
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_artists",
+            AsyncMock(side_effect=Exception("artists error")),
+        ),
+        patch(
+            "app.services.analysis_service.ClaudeAdapter.analyse",
+            AsyncMock(return_value=mock_result),
+        ),
+    ):
+        resp = await client.post(
+            f"/api/analyses/{analysis.id}/run",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert "Could not fetch top tracks" in data["result_text"]
+    assert "Could not fetch top artists" in data["result_text"]
+    assert "Not enough data" in data["result_text"]

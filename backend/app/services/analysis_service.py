@@ -14,6 +14,7 @@ from app.services import crypto
 from app.services.ai.base import AIProvider
 from app.services.ai.claude import ClaudeAdapter
 from app.services.ai.perplexity import PerplexityAdapter
+from app.services.music.base import TopArtist, TopTrack
 from app.services.music.spotify import SpotifyAdapter
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,9 @@ async def run_analysis(
         run.id, analysis_id, ai_config.provider, time_window_days,
     )
 
+    # Collect warnings for non-fatal failures that occur during data fetching.
+    warnings: list[str] = []
+
     try:
         # Decrypt the Spotify access token and refresh if expired
         access_token = crypto.decrypt(spotify_account.encrypted_access_token)
@@ -128,23 +132,38 @@ async def run_analysis(
 
         music_adapter = SpotifyAdapter()
 
-        # Fetch top tracks (not stored in DB; used only for this analysis run)
-        top_tracks = await music_adapter.get_top_tracks(
-            access_token, limit=50, time_range=time_range
-        )
-        logger.info(
-            "Fetched %d top track(s) for analysis %s (time_range: %s)",
-            len(top_tracks), analysis_id, time_range,
-        )
+        # Fetch top tracks — tolerate failure so the rest of the analysis can
+        # still proceed with whatever data is available.
+        top_tracks: list[TopTrack] = []
+        try:
+            top_tracks = await music_adapter.get_top_tracks(
+                access_token, limit=50, time_range=time_range
+            )
+            logger.info(
+                "Fetched %d top track(s) for analysis %s (time_range: %s)",
+                len(top_tracks), analysis_id, time_range,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to fetch top tracks for analysis %s: %s", analysis_id, exc,
+            )
+            warnings.append("Could not fetch top tracks from Spotify.")
 
-        # Fetch top artists (not stored in DB; used only for this analysis run)
-        top_artists = await music_adapter.get_top_artists(
-            access_token, limit=50, time_range=time_range
-        )
-        logger.info(
-            "Fetched %d top artist(s) for analysis %s (time_range: %s)",
-            len(top_artists), analysis_id, time_range,
-        )
+        # Fetch top artists — tolerate failure independently.
+        top_artists: list[TopArtist] = []
+        try:
+            top_artists = await music_adapter.get_top_artists(
+                access_token, limit=50, time_range=time_range
+            )
+            logger.info(
+                "Fetched %d top artist(s) for analysis %s (time_range: %s)",
+                len(top_artists), analysis_id, time_range,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to fetch top artists for analysis %s: %s", analysis_id, exc,
+            )
+            warnings.append("Could not fetch top artists from Spotify.")
 
         # Format top tracks as plain text
         if top_tracks:
@@ -182,9 +201,17 @@ async def run_analysis(
             track_list=combined_list,
         )
 
+        # Build the final result text, prepending any warnings.
+        result_parts: list[str] = []
+        if warnings:
+            warning_block = "\n".join(f"⚠️ {w}" for w in warnings)
+            result_parts.append(warning_block)
+        result_parts.append(ai_result.text)
+        full_result = "\n\n".join(result_parts)
+
         # Update run with success
         run.status = "completed"
-        run.result_text = ai_result.text
+        run.result_text = full_result
         run.model = ai_result.model
         run.input_tokens = ai_result.input_tokens
         run.output_tokens = ai_result.output_tokens
