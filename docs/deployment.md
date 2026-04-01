@@ -58,6 +58,7 @@ Copy `.env.example` to `.env` and fill in all required values before starting th
 | `SMTP_PASSWORD` | ✅ | SMTP password |
 | `SMTP_FROM` | ✅ | Sender email address |
 | `SMTP_TLS` | | `true` / `false` (default `true`) |
+| `DATA_PATH` | ✅ (production) | Absolute path on the Docker host where persistent data is stored, e.g. `/opt/music-history-analyser/data` |
 
 ### Generating a SECRET_KEY
 
@@ -86,6 +87,10 @@ ghcr.io/vansummeren/music-history-analyser-frontend:<git-sha>
 # On the Docker host
 mkdir -p /opt/music-history-analyser
 cd /opt/music-history-analyser
+
+# Create the persistent-data directory for PostgreSQL (bind-mounted volume)
+# Set DATA_PATH to this path in your .env file
+mkdir -p ./data/db
 
 # Download the prod compose file
 curl -O https://raw.githubusercontent.com/vansummeren/music-history-analyser/main/docker-compose.prod.yml

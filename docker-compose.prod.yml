@@ -133,11 +133,6 @@ volumes:
       o: bind
       device: ${DATA_PATH}/db
   celerybeat_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DATA_PATH}/beat
 
 networks:
   internal:
