@@ -644,6 +644,130 @@ async def test_history_triggers_token_refresh_when_expired(
     assert crypto.decrypt(account.encrypted_refresh_token) == "new-refresh"
 
 
+@pytest.mark.asyncio
+async def test_history_token_refresh_http_error_returns_502(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """A Spotify HTTP error during token refresh must return 502, not 500."""
+    user, token = await _make_user(db_session, fake_redis, sub="hist-err1")
+    account = await _make_spotify_account(
+        db_session,
+        user,
+        expires_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+
+    with patch(
+        "app.routers.spotify.SpotifyAdapter.refresh_token",
+        AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Unauthorized",
+                request=httpx.Request("POST", "https://accounts.spotify.com/api/token"),
+                response=httpx.Response(401),
+            )
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/accounts/{account.id}/history",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_history_token_refresh_network_error_returns_502(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """A network error during token refresh must return 502, not 500."""
+    user, token = await _make_user(db_session, fake_redis, sub="hist-err2")
+    account = await _make_spotify_account(
+        db_session,
+        user,
+        expires_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+
+    with patch(
+        "app.routers.spotify.SpotifyAdapter.refresh_token",
+        AsyncMock(
+            side_effect=httpx.RequestError(
+                "connection error",
+                request=httpx.Request("POST", "https://accounts.spotify.com/api/token"),
+            )
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/accounts/{account.id}/history",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_history_recently_played_http_error_returns_502(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """A Spotify HTTP error during recently-played fetch must return 502, not 500."""
+    user, token = await _make_user(db_session, fake_redis, sub="hist-err3")
+    account = await _make_spotify_account(db_session, user)
+
+    with patch(
+        "app.routers.spotify.SpotifyAdapter.get_recently_played",
+        AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Service Unavailable",
+                request=httpx.Request(
+                    "GET",
+                    "https://api.spotify.com/v1/me/player/recently-played",
+                ),
+                response=httpx.Response(503),
+            )
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/accounts/{account.id}/history",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_history_recently_played_network_error_returns_502(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """A network error during recently-played fetch must return 502, not 500."""
+    user, token = await _make_user(db_session, fake_redis, sub="hist-err4")
+    account = await _make_spotify_account(db_session, user)
+
+    with patch(
+        "app.routers.spotify.SpotifyAdapter.get_recently_played",
+        AsyncMock(
+            side_effect=httpx.RequestError(
+                "connection reset",
+                request=httpx.Request(
+                    "GET",
+                    "https://api.spotify.com/v1/me/player/recently-played",
+                ),
+            )
+        ),
+    ):
+        resp = await client.get(
+            f"/api/spotify/accounts/{account.id}/history",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 502
+
+
 # ── 6. Crypto helpers ─────────────────────────────────────────────────────────
 
 
