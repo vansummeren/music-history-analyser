@@ -49,7 +49,7 @@ celery_app = Celery(
     "music_history_analyser",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.analysis_tasks", "app.tasks.scheduler"],
+    include=["app.tasks.analysis_tasks", "app.tasks.scheduler", "app.tasks.history_tasks"],
 )
 
 celery_app.conf.update(
@@ -63,6 +63,10 @@ celery_app.conf.update(
         "check-due-schedules-every-minute": {
             "task": "check_due_schedules",
             "schedule": crontab(),  # every minute
+        },
+        "check-due-history-polls-every-minute": {
+            "task": "check_due_history_polls",
+            "schedule": crontab(),  # every minute — per-account interval enforced in service
         },
     },
 )

@@ -15,6 +15,7 @@ from app.models.spotify_account import SpotifyAccount
 from app.models.user import User
 from app.services import auth_service, crypto
 from app.services.ai.base import AnalysisResult
+from app.services.music.base import TopArtist, TopTrack
 from tests.conftest import FakeRedis
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -238,19 +239,24 @@ async def test_trigger_run_success(
     db_session: AsyncSession,
     fake_redis: FakeRedis,
 ) -> None:
-    from app.services.music.base import Track
-
     user, token = await _make_user(db_session, fake_redis, sub="sub-run")
     account = await _make_spotify_account(db_session, user)
     ai_config = await _make_ai_config(db_session, user)
     analysis = await _make_analysis(db_session, user, account, ai_config)
 
     mock_tracks = [
-        Track(
+        TopTrack(
+            external_id="track-a",
             title="Song A",
             artist="Artist A",
             album="Album A",
-            played_at=datetime.now(UTC) - timedelta(hours=2),
+        )
+    ]
+    mock_artists = [
+        TopArtist(
+            external_id="artist-a",
+            name="Artist A",
+            genres=["pop"],
         )
     ]
     mock_result = AnalysisResult(
@@ -262,8 +268,12 @@ async def test_trigger_run_success(
 
     with (
         patch(
-            "app.services.analysis_service.SpotifyAdapter.get_recently_played",
+            "app.services.analysis_service.SpotifyAdapter.get_top_tracks",
             AsyncMock(return_value=mock_tracks),
+        ),
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_artists",
+            AsyncMock(return_value=mock_artists),
         ),
         patch(
             "app.services.analysis_service.ClaudeAdapter.analyse",
@@ -297,7 +307,11 @@ async def test_trigger_run_ai_failure_stored_as_failed(
 
     with (
         patch(
-            "app.services.analysis_service.SpotifyAdapter.get_recently_played",
+            "app.services.analysis_service.SpotifyAdapter.get_top_tracks",
+            AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.analysis_service.SpotifyAdapter.get_top_artists",
             AsyncMock(return_value=[]),
         ),
         patch(

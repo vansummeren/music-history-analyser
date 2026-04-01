@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,8 +35,10 @@ async def run_analysis(
 ) -> AnalysisRun:
     """Execute one analysis run and persist the result.
 
-    Fetches recent Spotify history, formats a track list, calls the configured
-    AI provider, and stores the result in an ``AnalysisRun`` row.
+    Fetches the user's top tracks and top artists from Spotify (these are not
+    stored in the DB — they are fetched on demand for every analysis run) and
+    formats them as a structured text prompt for the configured AI provider.
+    The result is stored in an ``AnalysisRun`` row.
     """
     # Load the Analysis with its related objects
     result = await db.execute(select(Analysis).where(Analysis.id == analysis_id))
@@ -100,27 +102,59 @@ async def run_analysis(
                 spotify_account.id, new_expires.isoformat(),
             )
 
-        # Fetch history for the specified time window
+        # Map time_window_days to a Spotify time_range for top tracks/artists
+        # short_term  ≈ 4 weeks  → up to 28 days
+        # medium_term ≈ 6 months → up to ~180 days
+        # long_term   = all time → anything longer
+        if time_window_days <= 28:
+            time_range = "short_term"
+        elif time_window_days <= 180:
+            time_range = "medium_term"
+        else:
+            time_range = "long_term"
+
         music_adapter = SpotifyAdapter()
-        after = now - timedelta(days=time_window_days)
-        tracks = await music_adapter.get_recently_played(
-            access_token, after=after, limit=50
+
+        # Fetch top tracks (not stored in DB; used only for this analysis run)
+        top_tracks = await music_adapter.get_top_tracks(
+            access_token, limit=50, time_range=time_range
         )
         logger.info(
-            "Fetched %d track(s) for analysis %s (window: %d days)",
-            len(tracks), analysis_id, time_window_days,
+            "Fetched %d top track(s) for analysis %s (time_range: %s)",
+            len(top_tracks), analysis_id, time_range,
         )
 
-        # Format track list as plain text
-        if tracks:
+        # Fetch top artists (not stored in DB; used only for this analysis run)
+        top_artists = await music_adapter.get_top_artists(
+            access_token, limit=50, time_range=time_range
+        )
+        logger.info(
+            "Fetched %d top artist(s) for analysis %s (time_range: %s)",
+            len(top_artists), analysis_id, time_range,
+        )
+
+        # Format top tracks as plain text
+        if top_tracks:
             track_lines = [
                 f"{i + 1}. {t.title} — {t.artist} ({t.album})"
-                f" [{t.played_at.strftime('%Y-%m-%d %H:%M')}]"
-                for i, t in enumerate(tracks)
+                for i, t in enumerate(top_tracks)
             ]
-            track_list = "\n".join(track_lines)
+            track_list = "Top Tracks:\n" + "\n".join(track_lines)
         else:
-            track_list = "(no tracks found in the last 7 days)"
+            track_list = "Top Tracks:\n(no top tracks found)"
+
+        # Format top artists as plain text
+        if top_artists:
+            artist_lines = [
+                f"{i + 1}. {a.name}" + (f" [{', '.join(a.genres[:3])}]" if a.genres else "")
+                for i, a in enumerate(top_artists)
+            ]
+            artist_list = "Top Artists:\n" + "\n".join(artist_lines)
+        else:
+            artist_list = "Top Artists:\n(no top artists found)"
+
+        # Combine into the track_list string passed to the AI adapter
+        combined_list = f"{track_list}\n\n{artist_list}"
 
         # Decrypt the AI API key and call the AI provider
         api_key = crypto.decrypt(ai_config.encrypted_api_key)
@@ -132,7 +166,7 @@ async def run_analysis(
         ai_result = await ai_adapter.analyse(
             api_key=api_key,
             prompt=analysis.prompt,
-            track_list=track_list,
+            track_list=combined_list,
         )
 
         # Update run with success
