@@ -148,6 +148,71 @@ async def test_send_analysis_result_propagates_smtp_error() -> None:
         )
 
 
+# ── Email formatting ──────────────────────────────────────────────────────────
+
+
+def _html_body(msg: MIMEMultipart) -> str:
+    """Extract the HTML payload from a MIME message."""
+    for part in msg.walk():
+        if part.get_content_type() == "text/html":
+            raw = part.get_payload(decode=True)
+            if isinstance(raw, bytes):
+                return raw.decode()
+            return part.get_payload() or ""
+    return ""
+
+
+@pytest.mark.asyncio
+async def test_email_renders_markdown_to_html() -> None:
+    """Markdown formatting in result_text should be rendered as HTML tags."""
+    from app.services.email_service import send_analysis_result
+
+    sent: list[MIMEMultipart] = []
+    ctx = _mock_smtp_context(sent)
+
+    result_text = "## Your Music Taste\n\nYou love **jazz** and *blues*.\n\n- Miles Davis\n- John Coltrane"
+
+    with patch("app.services.email_service.aiosmtplib.SMTP", return_value=ctx):
+        await send_analysis_result(
+            recipient="a@b.com",
+            schedule_name="Weekly",
+            analysis_name="Test",
+            result_text=result_text,
+            time_window_days=7,
+        )
+
+    html = _html_body(sent[0])
+    # Markdown headings, bold, italic and list items should be converted
+    assert "<h2>" in html or "<h2 " in html
+    assert "<strong>jazz</strong>" in html
+    assert "<em>blues</em>" in html
+    assert "<li>" in html
+
+
+@pytest.mark.asyncio
+async def test_email_handles_curly_braces_in_result() -> None:
+    """Curly braces in the AI response must not break .format()-style templating."""
+    from app.services.email_service import send_analysis_result
+
+    sent: list[MIMEMultipart] = []
+    ctx = _mock_smtp_context(sent)
+
+    result_text = 'Here is some JSON: {"genre": "jazz", "count": 5}'
+
+    with patch("app.services.email_service.aiosmtplib.SMTP", return_value=ctx):
+        await send_analysis_result(
+            recipient="a@b.com",
+            schedule_name="S",
+            analysis_name="A",
+            result_text=result_text,
+            time_window_days=7,
+        )
+
+    assert len(sent) == 1
+    plain = _plain_text(sent[0])
+    assert '{"genre": "jazz"' in plain
+
+
 # ── Scheduled analysis task: email always sent ────────────────────────────────
 
 

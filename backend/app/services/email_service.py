@@ -1,36 +1,45 @@
 """Email service — send analysis results over SMTP."""
 from __future__ import annotations
 
+import html as html_mod
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from string import Template
 
 import aiosmtplib
+import markdown
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_HTML_TEMPLATE = """\
+# Use string.Template ($var) instead of str.format ({var}) so that curly
+# braces in the AI-generated result_html are not misinterpreted.
+_HTML_TEMPLATE = Template("""\
 <!doctype html>
 <html>
 <head><meta charset="utf-8" /></head>
 <body style="font-family: sans-serif; max-width: 640px; margin: auto; padding: 24px;">
   <h1 style="color: #1db954;">Music History Analysis</h1>
-  <p><strong>Schedule:</strong> {schedule_name}</p>
-  <p><strong>Time window:</strong> last {time_window_days} days</p>
+  <p><strong>Schedule:</strong> $schedule_name</p>
+  <p><strong>Time window:</strong> last $time_window_days days</p>
   <hr style="border: none; border-top: 1px solid #eee; margin: 16px 0;" />
-  <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.6;">
-{result_text}
+  <div style="font-size: 14px; line-height: 1.6;">
+$result_html
   </div>
   <hr style="border: none; border-top: 1px solid #eee; margin: 16px 0;" />
   <p style="font-size: 12px; color: #888;">
     Sent by Music History Analyser &middot;
-    Analysis: {analysis_name}
+    Analysis: $analysis_name
   </p>
 </body>
 </html>
-"""
+""")
+
+# Reusable Markdown converter.  ``nl2br`` turns single newlines into <br>,
+# ``fenced_code`` handles ``` blocks, and ``tables`` handles markdown tables.
+_md = markdown.Markdown(extensions=["nl2br", "fenced_code", "tables"])
 
 
 def _build_message(
@@ -53,10 +62,16 @@ def _build_message(
         f"Analysis: {analysis_name}\n\n"
         f"{result_text}"
     )
-    html = _HTML_TEMPLATE.format(
-        schedule_name=schedule_name,
-        analysis_name=analysis_name,
-        result_text=result_text,
+
+    # Convert the AI markdown response to HTML.
+    # Reset the converter state so it can be reused across calls.
+    _md.reset()
+    result_html = _md.convert(result_text)
+
+    html = _HTML_TEMPLATE.safe_substitute(
+        schedule_name=html_mod.escape(schedule_name),
+        analysis_name=html_mod.escape(analysis_name),
+        result_html=result_html,
         time_window_days=time_window_days,
     )
     msg.attach(MIMEText(plain, "plain"))

@@ -13,5 +13,6 @@ python3-saml==1.16.0
 python-multipart==0.0.22
 httpx==0.28.1
 aiosmtplib==3.0.2
+markdown==3.10.2
 anthropic==0.43.0
 croniter==6.2.2
