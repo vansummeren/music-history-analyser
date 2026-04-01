@@ -14,6 +14,7 @@ from app.services import crypto
 from app.services.ai.base import AIProvider
 from app.services.ai.claude import ClaudeAdapter
 from app.services.ai.perplexity import PerplexityAdapter
+from app.services.music.base import TopArtist, TopTrack
 from app.services.music.spotify import SpotifyAdapter
 
 logger = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ async def run_analysis(
 
         # Fetch top tracks — tolerate failure so the rest of the analysis can
         # still proceed with whatever data is available.
-        top_tracks: list[object] = []
+        top_tracks: list[TopTrack] = []
         try:
             top_tracks = await music_adapter.get_top_tracks(
                 access_token, limit=50, time_range=time_range
@@ -146,10 +147,10 @@ async def run_analysis(
             logger.warning(
                 "Failed to fetch top tracks for analysis %s: %s", analysis_id, exc,
             )
-            warnings.append(f"Could not fetch top tracks: {exc}")
+            warnings.append("Could not fetch top tracks from Spotify.")
 
         # Fetch top artists — tolerate failure independently.
-        top_artists: list[object] = []
+        top_artists: list[TopArtist] = []
         try:
             top_artists = await music_adapter.get_top_artists(
                 access_token, limit=50, time_range=time_range
@@ -162,7 +163,7 @@ async def run_analysis(
             logger.warning(
                 "Failed to fetch top artists for analysis %s: %s", analysis_id, exc,
             )
-            warnings.append(f"Could not fetch top artists: {exc}")
+            warnings.append("Could not fetch top artists from Spotify.")
 
         # Format top tracks as plain text
         if top_tracks:

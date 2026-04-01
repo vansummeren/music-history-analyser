@@ -170,7 +170,11 @@ async def test_email_renders_markdown_to_html() -> None:
     sent: list[MIMEMultipart] = []
     ctx = _mock_smtp_context(sent)
 
-    result_text = "## Your Music Taste\n\nYou love **jazz** and *blues*.\n\n- Miles Davis\n- John Coltrane"
+    result_text = (
+        "## Your Music Taste\n\n"
+        "You love **jazz** and *blues*.\n\n"
+        "- Miles Davis\n- John Coltrane"
+    )
 
     with patch("app.services.email_service.aiosmtplib.SMTP", return_value=ctx):
         await send_analysis_result(

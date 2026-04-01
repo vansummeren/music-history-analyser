@@ -68,7 +68,7 @@ def _build_message(
     _md.reset()
     result_html = _md.convert(result_text)
 
-    html = _HTML_TEMPLATE.safe_substitute(
+    html = _HTML_TEMPLATE.substitute(
         schedule_name=html_mod.escape(schedule_name),
         analysis_name=html_mod.escape(analysis_name),
         result_html=result_html,
