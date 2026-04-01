@@ -57,9 +57,11 @@ async def link_spotify(
 
     The caller (frontend) should redirect the user's browser to ``auth_url``.
     """
+    logger.debug("Spotify link initiated for user %s", user.id)
     state = secrets.token_hex(16)
     # Store user_id so the callback knows who is linking
     await redis.set(f"{_STATE_PREFIX}{state}", str(user.id), ex=_STATE_TTL)
+    logger.debug("Spotify OAuth state stored in Redis (TTL=%ds)", _STATE_TTL)
 
     auth_url = (
         f"{_SPOTIFY_AUTH_URL}"
@@ -69,6 +71,9 @@ async def link_spotify(
         f"&redirect_uri={urllib.parse.quote(settings.spotify_redirect_uri)}"
         f"&state={state}"
         f"&show_dialog=true"
+    )
+    logger.debug(
+        "Spotify OAuth URL generated; redirect_uri=%s", settings.spotify_redirect_uri
     )
     return SpotifyLinkResponse(auth_url=auth_url)
 
@@ -86,16 +91,37 @@ async def spotify_callback(
     Handles both the success case (``code`` present) and the error case
     (``error`` present, e.g. user denied the authorisation on Spotify).
     """
+    logger.debug(
+        "Spotify OAuth callback received — code=%s, error=%s, state=%s…",
+        "present" if code else "absent",
+        error,
+        state[:8] if state else "None",
+    )
+
     # Always validate the state first so only legitimate OAuth flows can
     # consume it (prevents state-exhaustion / CSRF replay attacks).
     raw = await redis.get(f"{_STATE_PREFIX}{state}")
     if raw is None:
+        logger.warning("Spotify callback: state not found or expired in Redis")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired OAuth state",
         )
     await redis.delete(f"{_STATE_PREFIX}{state}")
-    user_id = uuid.UUID(raw.decode() if isinstance(raw, bytes) else raw)
+    logger.debug("Spotify callback: state validated and consumed from Redis")
+
+    try:
+        user_id = uuid.UUID(raw.decode() if isinstance(raw, bytes) else raw)
+    except (ValueError, AttributeError) as exc:
+        logger.error(
+            "Spotify callback: failed to parse user_id from state value %r: %s",
+            raw,
+            exc,
+        )
+        return RedirectResponse(
+            f"{settings.frontend_url}/spotify?error=unknown"
+        )
+    logger.debug("Spotify callback: resolved user_id=%s", user_id)
 
     # Spotify sent back an error (e.g. access_denied) — redirect to the
     # frontend so it can show a user-friendly message.
@@ -111,21 +137,40 @@ async def spotify_callback(
             safe_error = "state_mismatch"
         else:
             safe_error = "unknown"
+        logger.warning(
+            "Spotify callback: Spotify returned error=%s (mapped to %s), code=%s",
+            error,
+            safe_error,
+            "present" if code else "absent",
+        )
         return RedirectResponse(
             f"{settings.frontend_url}/spotify?error={safe_error}"
         )
 
     # Exchange authorization code for tokens
+    logger.debug("Spotify callback: exchanging authorization code for tokens")
     try:
         token_data = await exchange_code(code)
     except httpx.HTTPStatusError as exc:
-        logger.warning("Spotify token exchange failed: %s", exc)
+        logger.warning(
+            "Spotify token exchange failed: HTTP %s — %s",
+            exc.response.status_code,
+            exc.response.text[:500] if exc.response.text else "(empty body)",
+        )
         return RedirectResponse(f"{settings.frontend_url}/spotify?error=token_exchange_failed")
     except httpx.RequestError as exc:
         logger.warning("Spotify token exchange request error: %s", exc)
         return RedirectResponse(f"{settings.frontend_url}/spotify?error=token_exchange_failed")
 
-    access_token: str = token_data["access_token"]
+    try:
+        access_token: str = token_data["access_token"]
+    except KeyError:
+        logger.error(
+            "Spotify token exchange response missing 'access_token'; keys present: %s",
+            list(token_data.keys()),
+        )
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=token_exchange_failed")
+
     # Spotify omits refresh_token on re-authorization of an already-approved app.
     # For new accounts it is always present; for re-links we fall back to the
     # existing stored token below.
@@ -133,31 +178,76 @@ async def spotify_callback(
     expires_in: int = token_data.get("expires_in", 3600)
     scopes: str = token_data.get("scope", "")
     expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
+    logger.debug(
+        "Spotify callback: token exchange succeeded — "
+        "refresh_token=%s, expires_in=%ds, scopes=%r",
+        "present" if refresh_token else "absent",
+        expires_in,
+        scopes,
+    )
 
     # Fetch Spotify user profile
+    logger.debug("Spotify callback: fetching Spotify user profile")
     try:
         spotify_user = await fetch_spotify_user(access_token)
     except httpx.HTTPStatusError as exc:
-        logger.warning("Spotify profile fetch failed: %s", exc)
+        logger.warning(
+            "Spotify profile fetch failed: HTTP %s — %s",
+            exc.response.status_code,
+            exc.response.text[:500] if exc.response.text else "(empty body)",
+        )
         return RedirectResponse(f"{settings.frontend_url}/spotify?error=profile_fetch_failed")
     except httpx.RequestError as exc:
         logger.warning("Spotify profile fetch request error: %s", exc)
         return RedirectResponse(f"{settings.frontend_url}/spotify?error=profile_fetch_failed")
-    spotify_user_id: str = spotify_user["id"]
+
+    try:
+        spotify_user_id: str = spotify_user["id"]
+    except KeyError:
+        logger.error(
+            "Spotify profile response missing 'id'; keys present: %s",
+            list(spotify_user.keys()),
+        )
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=profile_fetch_failed")
+
     display_name: str | None = spotify_user.get("display_name")
     email_list: list[dict[str, Any]] = spotify_user.get("emails", [])
     email: str | None = email_list[0].get("email") if email_list else spotify_user.get("email")
+    logger.debug(
+        "Spotify callback: profile fetched — spotify_user_id=%s, display_name=%s, email=%s",
+        spotify_user_id,
+        display_name,
+        "(set)" if email else "(not set)",
+    )
 
     # Encrypt access token; refresh token is encrypted only when present.
-    enc_access = crypto.encrypt(access_token)
+    try:
+        enc_access = crypto.encrypt(access_token)
+    except Exception:
+        logger.exception("Spotify callback: failed to encrypt access token")
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
+    logger.debug("Spotify callback: access token encrypted successfully")
 
     # Upsert SpotifyAccount (one row per spotify_user_id)
-    result = await db.execute(
-        select(SpotifyAccount).where(SpotifyAccount.spotify_user_id == spotify_user_id)
+    logger.debug(
+        "Spotify callback: querying existing SpotifyAccount for spotify_user_id=%s",
+        spotify_user_id,
     )
-    account = result.scalar_one_or_none()
+    try:
+        result = await db.execute(
+            select(SpotifyAccount).where(SpotifyAccount.spotify_user_id == spotify_user_id)
+        )
+        account = result.scalar_one_or_none()
+    except Exception:
+        logger.exception(
+            "Spotify callback: database query for existing account failed"
+        )
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
 
     if account is None:
+        logger.debug(
+            "Spotify callback: no existing account found — creating new SpotifyAccount"
+        )
         # Brand-new Spotify account — refresh_token is required.
         # Spotify only issues refresh_token on the first authorization; if the
         # account was previously linked and then unlinked, the user must revoke
@@ -172,18 +262,37 @@ async def spotify_callback(
             return RedirectResponse(
                 f"{settings.frontend_url}/spotify?error=no_refresh_token"
             )
-        account = SpotifyAccount(
-            user_id=user_id,
-            spotify_user_id=spotify_user_id,
-            display_name=display_name,
-            email=email,
-            encrypted_access_token=enc_access,
-            encrypted_refresh_token=crypto.encrypt(refresh_token),
-            token_expires_at=expires_at,
-            scopes=scopes,
+        try:
+            account = SpotifyAccount(
+                user_id=user_id,
+                spotify_user_id=spotify_user_id,
+                display_name=display_name,
+                email=email,
+                encrypted_access_token=enc_access,
+                encrypted_refresh_token=crypto.encrypt(refresh_token),
+                token_expires_at=expires_at,
+                scopes=scopes,
+            )
+            db.add(account)
+        except Exception:
+            logger.exception(
+                "Spotify callback: failed to create SpotifyAccount"
+            )
+            return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
+        logger.info(
+            "Spotify callback: new SpotifyAccount prepared — "
+            "user_id=%s, spotify_user_id=%s",
+            user_id,
+            spotify_user_id,
         )
-        db.add(account)
     else:
+        logger.debug(
+            "Spotify callback: existing account found (id=%s, owner=%s) — "
+            "updating tokens and ownership to user_id=%s",
+            account.id,
+            account.user_id,
+            user_id,
+        )
         # Re-link: update tokens and ownership.
         # Keep the stored refresh_token when Spotify doesn't issue a new one.
         account.user_id = user_id
@@ -191,12 +300,33 @@ async def spotify_callback(
         account.email = email
         account.encrypted_access_token = enc_access
         if refresh_token is not None:
-            account.encrypted_refresh_token = crypto.encrypt(refresh_token)
+            try:
+                account.encrypted_refresh_token = crypto.encrypt(refresh_token)
+            except Exception:
+                logger.exception(
+                    "Spotify callback: failed to encrypt refresh token"
+                )
+                return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
         account.token_expires_at = expires_at
         account.scopes = scopes
         account.updated_at = datetime.now(UTC)
+        logger.info(
+            "Spotify callback: existing SpotifyAccount updated — "
+            "account_id=%s, spotify_user_id=%s",
+            account.id,
+            spotify_user_id,
+        )
 
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        logger.exception("Spotify callback: database commit failed")
+        return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
+    logger.info(
+        "Spotify callback: account persisted successfully; "
+        "redirecting to %s/spotify",
+        settings.frontend_url,
+    )
 
     return RedirectResponse(f"{settings.frontend_url}/spotify")
 
