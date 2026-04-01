@@ -408,11 +408,13 @@ async def get_play_events(
     tracks_result = await db.execute(
         select(Track).where(
             or_(
-                and_(
-                    Track.provider == provider,
-                    Track.external_id == ext_id,
+                *(
+                    and_(
+                        Track.provider == provider,
+                        Track.external_id == ext_id,
+                    )
+                    for provider, ext_id in track_keys
                 )
-                for provider, ext_id in track_keys
             )
         )
     )
@@ -424,11 +426,13 @@ async def get_play_events(
     track_artists_result = await db.execute(
         select(TrackArtist).where(
             or_(
-                and_(
-                    TrackArtist.track_provider == provider,
-                    TrackArtist.track_external_id == ext_id,
+                *(
+                    and_(
+                        TrackArtist.track_provider == provider,
+                        TrackArtist.track_external_id == ext_id,
+                    )
+                    for provider, ext_id in track_keys
                 )
-                for provider, ext_id in track_keys
             )
         )
     )
@@ -441,11 +445,13 @@ async def get_play_events(
         artists_result = await db.execute(
             select(Artist).where(
                 or_(
-                    and_(
-                        Artist.provider == provider,
-                        Artist.external_id == ext_id,
+                    *(
+                        and_(
+                            Artist.provider == provider,
+                            Artist.external_id == ext_id,
+                        )
+                        for provider, ext_id in artist_keys
                     )
-                    for provider, ext_id in artist_keys
                 )
             )
         )
@@ -473,11 +479,13 @@ async def get_play_events(
         albums_result = await db.execute(
             select(Album).where(
                 or_(
-                    and_(
-                        Album.provider == provider,
-                        Album.external_id == ext_id,
+                    *(
+                        and_(
+                            Album.provider == provider,
+                            Album.external_id == ext_id,
+                        )
+                        for provider, ext_id in album_keys
                     )
-                    for provider, ext_id in album_keys
                 )
             )
         )
