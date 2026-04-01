@@ -102,6 +102,19 @@ async def run_analysis(
                 spotify_account.id, new_expires.isoformat(),
             )
 
+        # Verify the account has the scopes required by the top-tracks/artists API.
+        # Accounts connected before "user-top-read" was added to SPOTIFY_SCOPES will
+        # be missing this scope; the user must re-link their Spotify account to grant it.
+        account_scopes = set(spotify_account.scopes.split())
+        required_scopes = {"user-top-read"}
+        missing_scopes = required_scopes - account_scopes
+        if missing_scopes:
+            raise ValueError(
+                f"Spotify account is missing required scope(s): "
+                f"{', '.join(sorted(missing_scopes))}. "
+                "Please reconnect your Spotify account to grant the missing permissions."
+            )
+
         # Map time_window_days to a Spotify time_range for top tracks/artists
         # short_term  ≈ 4 weeks  → up to 28 days
         # medium_term ≈ 6 months → up to ~180 days

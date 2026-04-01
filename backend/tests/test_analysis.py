@@ -56,7 +56,7 @@ async def _make_spotify_account(db: AsyncSession, user: User) -> SpotifyAccount:
         encrypted_access_token=crypto.encrypt("access-token"),
         encrypted_refresh_token=crypto.encrypt("refresh-token"),
         token_expires_at=datetime.now(UTC) + timedelta(hours=1),
-        scopes="user-read-recently-played",
+        scopes="user-read-recently-played user-top-read",
     )
     db.add(account)
     await db.commit()
