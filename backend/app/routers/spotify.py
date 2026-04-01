@@ -223,8 +223,8 @@ async def spotify_callback(
     # Encrypt access token; refresh token is encrypted only when present.
     try:
         enc_access = crypto.encrypt(access_token)
-    except Exception as exc:
-        logger.exception("Spotify callback: failed to encrypt access token: %s", exc)
+    except Exception:
+        logger.exception("Spotify callback: failed to encrypt access token")
         return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
     logger.debug("Spotify callback: access token encrypted successfully")
 
@@ -238,9 +238,9 @@ async def spotify_callback(
             select(SpotifyAccount).where(SpotifyAccount.spotify_user_id == spotify_user_id)
         )
         account = result.scalar_one_or_none()
-    except Exception as exc:
+    except Exception:
         logger.exception(
-            "Spotify callback: database query for existing account failed: %s", exc
+            "Spotify callback: database query for existing account failed"
         )
         return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
 
@@ -274,9 +274,9 @@ async def spotify_callback(
                 scopes=scopes,
             )
             db.add(account)
-        except Exception as exc:
+        except Exception:
             logger.exception(
-                "Spotify callback: failed to create SpotifyAccount: %s", exc
+                "Spotify callback: failed to create SpotifyAccount"
             )
             return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
         logger.info(
@@ -302,9 +302,9 @@ async def spotify_callback(
         if refresh_token is not None:
             try:
                 account.encrypted_refresh_token = crypto.encrypt(refresh_token)
-            except Exception as exc:
+            except Exception:
                 logger.exception(
-                    "Spotify callback: failed to encrypt refresh token: %s", exc
+                    "Spotify callback: failed to encrypt refresh token"
                 )
                 return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
         account.token_expires_at = expires_at
@@ -319,8 +319,8 @@ async def spotify_callback(
 
     try:
         await db.commit()
-    except Exception as exc:
-        logger.exception("Spotify callback: database commit failed: %s", exc)
+    except Exception:
+        logger.exception("Spotify callback: database commit failed")
         return RedirectResponse(f"{settings.frontend_url}/spotify?error=unknown")
     logger.info(
         "Spotify callback: account persisted successfully; "
