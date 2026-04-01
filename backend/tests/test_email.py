@@ -151,7 +151,9 @@ async def test_send_analysis_result_propagates_smtp_error() -> None:
 # ── Scheduled analysis task: email always sent ────────────────────────────────
 
 
-def _make_run(*, status: str, result_text: str | None = None, error: str | None = None) -> MagicMock:
+def _make_run(
+    *, status: str, result_text: str | None = None, error: str | None = None
+) -> MagicMock:
     """Return a fake AnalysisRun-like object."""
     run = MagicMock()
     run.id = uuid.uuid4()
