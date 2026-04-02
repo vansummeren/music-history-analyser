@@ -533,7 +533,91 @@ async def test_spotify_adapter_get_top_artists() -> None:
     assert top_artists[0].popularity == 97
 
 
-# ── 7. SpotifyAccountRead schema includes polling fields ─────────────────────
+# ── 8. SpotifyRateLimitError — HTTP 429 handling ─────────────────────────────
+
+
+def _make_429_response(retry_after: str | None = "30") -> MagicMock:
+    """Build a mock httpx.Response for HTTP 429."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 429
+    headers: dict[str, str] = {}
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    mock_resp.headers = headers
+    return mock_resp
+
+
+def _make_mock_client(mock_resp: MagicMock) -> AsyncMock:
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    return mock_client
+
+
+@pytest.mark.asyncio
+async def test_get_recently_played_raises_rate_limit_error() -> None:
+    """get_recently_played should raise SpotifyRateLimitError on HTTP 429."""
+    from app.services.music.spotify import SpotifyAdapter, SpotifyRateLimitError
+
+    mock_resp = _make_429_response(retry_after="42")
+    mock_client = _make_mock_client(mock_resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        adapter = SpotifyAdapter()
+        with pytest.raises(SpotifyRateLimitError) as exc_info:
+            await adapter.get_recently_played("test-token")
+
+    assert exc_info.value.retry_after == 42
+
+
+@pytest.mark.asyncio
+async def test_get_recently_played_rate_limit_missing_header() -> None:
+    """SpotifyRateLimitError.retry_after defaults to 0 when Retry-After is absent."""
+    from app.services.music.spotify import SpotifyAdapter, SpotifyRateLimitError
+
+    mock_resp = _make_429_response(retry_after=None)
+    mock_client = _make_mock_client(mock_resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        adapter = SpotifyAdapter()
+        with pytest.raises(SpotifyRateLimitError) as exc_info:
+            await adapter.get_recently_played("test-token")
+
+    assert exc_info.value.retry_after == 0
+
+
+@pytest.mark.asyncio
+async def test_get_top_tracks_raises_rate_limit_error() -> None:
+    """get_top_tracks should raise SpotifyRateLimitError on HTTP 429."""
+    from app.services.music.spotify import SpotifyAdapter, SpotifyRateLimitError
+
+    mock_resp = _make_429_response(retry_after="15")
+    mock_client = _make_mock_client(mock_resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        adapter = SpotifyAdapter()
+        with pytest.raises(SpotifyRateLimitError) as exc_info:
+            await adapter.get_top_tracks("test-token")
+
+    assert exc_info.value.retry_after == 15
+
+
+@pytest.mark.asyncio
+async def test_get_top_artists_raises_rate_limit_error() -> None:
+    """get_top_artists should raise SpotifyRateLimitError on HTTP 429."""
+    from app.services.music.spotify import SpotifyAdapter, SpotifyRateLimitError
+
+    mock_resp = _make_429_response(retry_after="60")
+    mock_client = _make_mock_client(mock_resp)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        adapter = SpotifyAdapter()
+        with pytest.raises(SpotifyRateLimitError) as exc_info:
+            await adapter.get_top_artists("test-token")
+
+    assert exc_info.value.retry_after == 60
+
 
 
 @pytest.mark.asyncio

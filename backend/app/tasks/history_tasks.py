@@ -5,18 +5,32 @@ import asyncio
 import logging
 import uuid
 
+from celery import Task
+
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="poll_history_for_account", bind=True, max_retries=3)  # type: ignore
-def poll_history_for_account(self: object, account_id: str) -> dict[str, object]:
+def poll_history_for_account(self: Task, account_id: str) -> dict[str, object]:
     """Poll recently-played history for one streaming account and persist results.
 
     *account_id* is the UUID string of the ``SpotifyAccount`` row.
+    If Spotify responds with HTTP 429 the task is automatically retried after
+    the number of seconds indicated by the ``Retry-After`` response header.
     """
-    return asyncio.run(_poll(uuid.UUID(account_id)))
+    from app.services.music.spotify import SpotifyRateLimitError
+
+    try:
+        return asyncio.run(_poll(uuid.UUID(account_id)))
+    except SpotifyRateLimitError as exc:
+        logger.warning(
+            "Rate limited by Spotify for account %s; scheduling retry in %ds",
+            account_id,
+            exc.retry_after,
+        )
+        raise self.retry(countdown=exc.retry_after, exc=exc) from exc
 
 
 async def _poll(account_id: uuid.UUID) -> dict[str, object]:
@@ -24,6 +38,7 @@ async def _poll(account_id: uuid.UUID) -> dict[str, object]:
 
     from app.config import settings
     from app.services.history_service import poll_account
+    from app.services.music.spotify import SpotifyRateLimitError
 
     engine = create_async_engine(settings.database_url, echo=False)
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -32,6 +47,8 @@ async def _poll(account_id: uuid.UUID) -> dict[str, object]:
         async with SessionLocal() as db:
             new_events = await poll_account(db, account_id)
             return {"status": "completed", "account_id": str(account_id), "new_events": new_events}
+    except SpotifyRateLimitError:
+        raise  # propagate so the Celery task can schedule a retry
     except Exception as exc:  # noqa: BLE001
         logger.error("History poll failed for account %s: %s", account_id, exc)
         return {"status": "failed", "account_id": str(account_id), "error": str(exc)}
