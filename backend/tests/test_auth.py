@@ -342,6 +342,16 @@ def test_resolve_role_defaults_to_user() -> None:
     assert auth_service.resolve_role(["viewer"]) == "user"
 
 
+def test_resolve_role_uses_configured_group_name() -> None:
+    original = app_config.settings.admin_group_name
+    app_config.settings.admin_group_name = "Administrators"
+    try:
+        assert auth_service.resolve_role(["administrators"]) == "admin"
+        assert auth_service.resolve_role(["admin"]) == "user"
+    finally:
+        app_config.settings.admin_group_name = original
+
+
 # ── 10. /api/auth/login dispatcher ───────────────────────────────────────────
 
 

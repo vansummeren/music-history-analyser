@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
-import { BarChart2, Calendar, Cpu, LayoutDashboard, Music, ShieldCheck, X } from 'lucide-react'
+import { BarChart2, Calendar, Cpu, LayoutDashboard, Music, Settings, ShieldCheck, X } from 'lucide-react'
+import { useAuth } from '../hooks/useAuth'
 
 interface Props {
   open: boolean
@@ -7,15 +8,18 @@ interface Props {
 }
 
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true },
-  { to: '/spotify', icon: Music, label: 'Spotify Accounts', end: false },
-  { to: '/ai-configs', icon: Cpu, label: 'AI Configs', end: false },
-  { to: '/analyses', icon: BarChart2, label: 'Analyses', end: false },
-  { to: '/schedules', icon: Calendar, label: 'Schedules', end: false },
-  { to: '/admin', icon: ShieldCheck, label: 'Diagnostics', end: false },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard', end: true, adminOnly: false },
+  { to: '/spotify', icon: Music, label: 'Spotify Accounts', end: false, adminOnly: false },
+  { to: '/ai-configs', icon: Cpu, label: 'AI Configs', end: false, adminOnly: false },
+  { to: '/analyses', icon: BarChart2, label: 'Analyses', end: false, adminOnly: false },
+  { to: '/schedules', icon: Calendar, label: 'Schedules', end: false, adminOnly: false },
+  { to: '/admin', icon: ShieldCheck, label: 'Diagnostics', end: false, adminOnly: false },
+  { to: '/admin-panel', icon: Settings, label: 'Admin', end: false, adminOnly: true },
 ]
 
 export default function Sidebar({ open, onClose }: Props) {
+  const { user } = useAuth()
+  const visibleItems = navItems.filter((item) => !item.adminOnly || user?.role === 'admin')
   return (
     <>
       {/* Mobile backdrop */}
@@ -50,7 +54,7 @@ export default function Sidebar({ open, onClose }: Props) {
         {/* Nav links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Sidebar navigation">
           <ul className="space-y-1">
-            {navItems.map(({ to, icon: Icon, label, end }) => (
+            {visibleItems.map(({ to, icon: Icon, label, end }) => (
               <li key={to}>
                 <NavLink
                   to={to}

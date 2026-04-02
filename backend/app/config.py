@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     saml_sp_acs_url: str = ""
     # Attribute name in the SAML assertion that contains the user's roles list
     saml_roles_attribute: str = "roles"
+    # Group/role name from the IdP that grants admin access (case-insensitive)
+    admin_group_name: str = "admin"
 
     # Token lifetimes
     access_token_expire_minutes: int = 30
@@ -78,7 +80,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Build / version info (injected at image-build time via ARG → ENV)
-    app_version: str = "1.0.1"
+    app_version: str = "1.0.3"
     build_number: str = "dev"
     build_date: str = "unknown"
 

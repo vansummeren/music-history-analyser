@@ -1,19 +1,22 @@
-"""Diagnostic router — connectivity test endpoints for all authenticated users."""
+"""Diagnostic and admin router."""
 from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy import table as sa_table
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_role
 from app.models.ai_config import AIConfig
 from app.models.spotify_account import SpotifyAccount
 from app.models.user import User
 from app.schemas.admin import (
+    TableRow,
+    TablesResponse,
     TestAIRequest,
     TestAIResponse,
     TestEmailRequest,
@@ -37,6 +40,36 @@ def _get_ai_adapter(provider: str) -> AIProvider:
     if provider == "perplexity":
         return PerplexityAdapter()
     raise ValueError(f"Unknown AI provider: {provider!r}")
+
+
+# ── GET /api/admin/tables ─────────────────────────────────────────────────────
+
+_ADMIN_TABLES = [
+    "users",
+    "spotify_accounts",
+    "ai_configs",
+    "analyses",
+    "analysis_runs",
+    "schedules",
+    "artists",
+    "albums",
+    "tracks",
+    "play_events",
+]
+
+
+@router.get("/tables", response_model=TablesResponse)
+async def get_tables(
+    _user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> TablesResponse:
+    """Return row counts for all main database tables (admin only)."""
+    rows: list[TableRow] = []
+    for table_name in _ADMIN_TABLES:
+        result = await db.execute(select(func.count()).select_from(sa_table(table_name)))
+        count: int = result.scalar_one()
+        rows.append(TableRow(table=table_name, row_count=count))
+    return TablesResponse(tables=rows)
 
 
 # ── POST /api/admin/test-email ────────────────────────────────────────────────

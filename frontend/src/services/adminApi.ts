@@ -14,6 +14,15 @@ export interface TrackItem {
   played_at: string
 }
 
+export interface TableRow {
+  table: string
+  row_count: number
+}
+
+export interface TablesResponse {
+  tables: TableRow[]
+}
+
 export interface TestEmailResponse {
   message: string
   recipient: string
@@ -52,6 +61,14 @@ export async function adminTestSpotify(accountId: string): Promise<TestSpotifyRe
     {},
     { headers: authHeaders() },
   )
+  return resp.data
+}
+
+/** Fetch row counts for all main database tables (admin only). */
+export async function getTableStats(): Promise<TablesResponse> {
+  const resp = await api.get<TablesResponse>('/admin/tables', {
+    headers: authHeaders(),
+  })
   return resp.data
 }
 

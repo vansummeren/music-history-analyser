@@ -38,6 +38,15 @@ class TestSpotifyResponse(BaseModel):
     count: int
 
 
+class TableRow(BaseModel):
+    table: str
+    row_count: int
+
+
+class TablesResponse(BaseModel):
+    tables: list[TableRow]
+
+
 class TestAIResponse(BaseModel):
     config_id: uuid.UUID
     provider: str

@@ -278,3 +278,54 @@ async def test_test_ai_requires_auth(
         json={"prompt": "test"},
     )
     assert resp.status_code == 401
+
+
+# ── GET /api/admin/tables ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_tables_requires_admin_role(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Regular users receive 403 when accessing the tables endpoint."""
+    _, token = await _make_user(db_session, fake_redis)
+    resp = await client.get(
+        "/api/admin/tables",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tables_requires_auth(client: AsyncClient) -> None:
+    """Unauthenticated requests to /tables are rejected with 401."""
+    resp = await client.get("/api/admin/tables")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_tables_returns_row_counts_for_admin(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Admin users receive a list of table row counts."""
+    user, token = await _make_user(db_session, fake_redis)
+    user.role = "admin"
+    await db_session.commit()
+
+    resp = await client.get(
+        "/api/admin/tables",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "tables" in data
+    table_names = [row["table"] for row in data["tables"]]
+    assert "users" in table_names
+    assert "spotify_accounts" in table_names
+    for row in data["tables"]:
+        assert "row_count" in row
+        assert isinstance(row["row_count"], int)

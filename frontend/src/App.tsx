@@ -1,10 +1,12 @@
 import { Outlet, Route, Routes } from 'react-router-dom'
 import AppShell from './components/AppShell'
+import AdminRoute from './components/AdminRoute'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './hooks/useAuth'
 import { ToastProvider } from './hooks/useToast'
 import AIConfigPage from './pages/AIConfigPage'
 import AdminPage from './pages/AdminPage'
+import AdminPanelPage from './pages/AdminPanelPage'
 import AnalysisPage from './pages/AnalysisPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
 import DashboardPage from './pages/DashboardPage'
@@ -39,6 +41,14 @@ export default function App() {
             />
             <Route path="schedules" element={<SchedulesPage />} />
             <Route path="admin" element={<AdminPage />} />
+            <Route
+              path="admin-panel"
+              element={
+                <AdminRoute>
+                  <AdminPanelPage />
+                </AdminRoute>
+              }
+            />
           </Route>
         </Routes>
       </ToastProvider>
