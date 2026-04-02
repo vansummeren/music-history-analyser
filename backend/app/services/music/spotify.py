@@ -19,6 +19,35 @@ _SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 SPOTIFY_SCOPES = "user-read-recently-played user-read-email user-top-read"
 
 
+class SpotifyRateLimitError(Exception):
+    """Raised when Spotify returns HTTP 429 Too Many Requests."""
+
+    def __init__(self, retry_after: int) -> None:
+        self.retry_after = retry_after
+        super().__init__(f"Spotify rate limit exceeded; retry after {retry_after}s")
+
+
+def _check_rate_limit(resp: httpx.Response) -> None:
+    """If *resp* is a 429, log the ``Retry-After`` value and raise :exc:`SpotifyRateLimitError`."""
+    if resp.status_code != 429:
+        return
+    retry_after_str = resp.headers.get("Retry-After", "0")
+    try:
+        parsed = int(retry_after_str)
+        if parsed < 0:
+            logger.warning(
+                "Spotify returned a negative Retry-After value (%d); treating as 0", parsed
+            )
+        retry_after = max(0, parsed)
+    except ValueError:
+        retry_after = 0
+    logger.warning(
+        "Spotify rate limit hit (HTTP 429); Retry-After: %ds — backing off",
+        retry_after,
+    )
+    raise SpotifyRateLimitError(retry_after)
+
+
 class SpotifyAdapter(MusicProvider):
     """Adapter that wraps the Spotify Web API."""
 
@@ -52,6 +81,7 @@ class SpotifyAdapter(MusicProvider):
                 headers={"Authorization": f"Bearer {access_token}"},
                 params=params,
             )
+            _check_rate_limit(resp)
             resp.raise_for_status()
             data: dict[str, Any] = resp.json()
 
@@ -129,6 +159,7 @@ class SpotifyAdapter(MusicProvider):
                 headers={"Authorization": f"Bearer {access_token}"},
                 params={"limit": min(limit, 50), "time_range": time_range},
             )
+            _check_rate_limit(resp)
             resp.raise_for_status()
             data: dict[str, Any] = resp.json()
 
@@ -174,6 +205,7 @@ class SpotifyAdapter(MusicProvider):
                 headers={"Authorization": f"Bearer {access_token}"},
                 params={"limit": min(limit, 50), "time_range": time_range},
             )
+            _check_rate_limit(resp)
             resp.raise_for_status()
             data: dict[str, Any] = resp.json()
 
