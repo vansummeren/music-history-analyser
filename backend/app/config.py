@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Build / version info (injected at image-build time via ARG → ENV)
-    app_version: str = "1.0.2"
+    app_version: str = "1.0.3"
     build_number: str = "dev"
     build_date: str = "unknown"
 

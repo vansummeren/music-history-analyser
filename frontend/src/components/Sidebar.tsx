@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { BarChart2, Calendar, Cpu, LayoutDashboard, Music, ShieldCheck, X } from 'lucide-react'
+import { BarChart2, Calendar, Cpu, LayoutDashboard, Music, Settings, ShieldCheck, X } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 
 interface Props {
@@ -13,7 +13,8 @@ const navItems = [
   { to: '/ai-configs', icon: Cpu, label: 'AI Configs', end: false, adminOnly: false },
   { to: '/analyses', icon: BarChart2, label: 'Analyses', end: false, adminOnly: false },
   { to: '/schedules', icon: Calendar, label: 'Schedules', end: false, adminOnly: false },
-  { to: '/admin', icon: ShieldCheck, label: 'Diagnostics', end: false, adminOnly: true },
+  { to: '/admin', icon: ShieldCheck, label: 'Diagnostics', end: false, adminOnly: false },
+  { to: '/admin-panel', icon: Settings, label: 'Admin', end: false, adminOnly: true },
 ]
 
 export default function Sidebar({ open, onClose }: Props) {

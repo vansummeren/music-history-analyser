@@ -42,13 +42,15 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: /AI Configs/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Analyses/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Schedules/i })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /Diagnostics/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Diagnostics/i })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /^Admin$/i })).not.toBeInTheDocument()
   })
 
-  it('renders the Diagnostics link for an admin user', () => {
+  it('renders the Admin link for an admin user', () => {
     mockAuthUser('admin')
     renderSidebar()
     expect(screen.getByRole('link', { name: /Diagnostics/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Admin$/i })).toBeInTheDocument()
   })
 
   it('renders the close button', () => {
@@ -56,18 +58,19 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: /Close menu/i })).toBeInTheDocument()
   })
 
-  it('nav links point to the correct paths for a regular user', () => {
+  it('Diagnostics link points to /admin for a regular user', () => {
     renderSidebar()
     expect(screen.getByRole('link', { name: /Dashboard/i })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: /Spotify/i })).toHaveAttribute('href', '/spotify')
     expect(screen.getByRole('link', { name: /AI Configs/i })).toHaveAttribute('href', '/ai-configs')
     expect(screen.getByRole('link', { name: /Analyses/i })).toHaveAttribute('href', '/analyses')
     expect(screen.getByRole('link', { name: /Schedules/i })).toHaveAttribute('href', '/schedules')
+    expect(screen.getByRole('link', { name: /Diagnostics/i })).toHaveAttribute('href', '/admin')
   })
 
-  it('Diagnostics link points to /admin for an admin user', () => {
+  it('Admin link points to /admin-panel for an admin user', () => {
     mockAuthUser('admin')
     renderSidebar()
-    expect(screen.getByRole('link', { name: /Diagnostics/i })).toHaveAttribute('href', '/admin')
+    expect(screen.getByRole('link', { name: /^Admin$/i })).toHaveAttribute('href', '/admin-panel')
   })
 })
