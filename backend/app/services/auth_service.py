@@ -247,11 +247,12 @@ async def fetch_oidc_userinfo(
 def resolve_role(idp_roles: list[str]) -> str:
     """Map a list of IdP role strings to the internal role.
 
-    Returns ``"admin"`` if ``"admin"`` appears in *idp_roles* (case-insensitive),
+    Returns ``"admin"`` if the configured admin group name (``ADMIN_GROUP_NAME``,
+    default ``"admin"``) appears in *idp_roles* (case-insensitive),
     otherwise returns ``"user"``.
     """
     normalised = {r.lower() for r in idp_roles}
-    return "admin" if "admin" in normalised else "user"
+    return "admin" if settings.admin_group_name.lower() in normalised else "user"
 
 
 def extract_oidc_roles(userinfo: dict[str, Any]) -> list[str]:
