@@ -13,7 +13,7 @@ from app.models.ai_config import AIConfig
 from app.models.analysis import Analysis, AnalysisRun
 from app.models.spotify_account import SpotifyAccount
 from app.models.user import User
-from app.schemas.analysis import AnalysisCreate, AnalysisRead, AnalysisRunRead
+from app.schemas.analysis import AnalysisCreate, AnalysisRead, AnalysisRunRead, AnalysisUpdate
 from app.services import analysis_service
 
 router = APIRouter(prefix="/api/analyses", tags=["analyses"])
@@ -65,6 +65,33 @@ async def list_analyses(
     """Return all analyses belonging to the authenticated user."""
     result = await db.execute(select(Analysis).where(Analysis.user_id == user.id))
     return list(result.scalars().all())
+
+
+@router.patch("/{analysis_id}", response_model=AnalysisRead)
+async def update_analysis(
+    analysis_id: uuid.UUID,
+    body: AnalysisUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Analysis:
+    """Update an analysis name and/or prompt."""
+    analysis = await db.get(Analysis, analysis_id)
+    if analysis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found"
+        )
+    if analysis.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this analysis",
+        )
+    if body.name is not None:
+        analysis.name = body.name
+    if body.prompt is not None:
+        analysis.prompt = body.prompt
+    await db.commit()
+    await db.refresh(analysis)
+    return analysis
 
 
 @router.delete("/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)

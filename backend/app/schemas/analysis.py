@@ -14,6 +14,11 @@ class AnalysisCreate(BaseModel):
     prompt: str
 
 
+class AnalysisUpdate(BaseModel):
+    name: str | None = None
+    prompt: str | None = None
+
+
 class AnalysisRead(BaseModel):
     model_config = {"from_attributes": True}
 

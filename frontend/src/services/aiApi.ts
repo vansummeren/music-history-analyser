@@ -16,6 +16,11 @@ export interface AIConfigCreate {
   api_key: string
 }
 
+export interface AIConfigUpdate {
+  display_name?: string
+  api_key?: string
+}
+
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('access_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
@@ -40,4 +45,12 @@ export async function getAIConfigs(): Promise<AIConfig[]> {
 /** Delete an AI configuration by ID. */
 export async function deleteAIConfig(id: string): Promise<void> {
   await api.delete(`/ai-configs/${id}`, { headers: authHeaders() })
+}
+
+/** Update an AI configuration's display name and/or API key. */
+export async function updateAIConfig(id: string, data: AIConfigUpdate): Promise<AIConfig> {
+  const resp = await api.patch<AIConfig>(`/ai-configs/${id}`, data, {
+    headers: authHeaders(),
+  })
+  return resp.data
 }

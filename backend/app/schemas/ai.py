@@ -16,6 +16,11 @@ class AIConfigCreate(BaseModel):
     api_key: str
 
 
+class AIConfigUpdate(BaseModel):
+    display_name: str | None = None
+    api_key: str | None = None
+
+
 class AIConfigRead(BaseModel):
     model_config = {"from_attributes": True}
 

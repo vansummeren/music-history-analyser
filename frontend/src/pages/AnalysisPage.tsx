@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BarChart2, Play, Plus, Trash2 } from 'lucide-react'
+import { BarChart2, Check, Pencil, Play, Plus, Trash2, X } from 'lucide-react'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import RunResultViewer from '../components/RunResultViewer'
 import { useToast } from '../hooks/useToast'
 import type { AIConfig } from '../services/aiApi'
 import { getAIConfigs } from '../services/aiApi'
-import type { Analysis, AnalysisCreate, AnalysisRun } from '../services/analysisApi'
+import type { Analysis, AnalysisCreate, AnalysisRun, AnalysisUpdate } from '../services/analysisApi'
 import {
   createAnalysis,
   deleteAnalysis,
   getAnalyses,
   getRuns,
   triggerRun,
+  updateAnalysis,
 } from '../services/analysisApi'
 import type { SpotifyAccount } from '../services/spotifyApi'
 import { getSpotifyAccounts } from '../services/spotifyApi'
@@ -30,6 +31,12 @@ export default function AnalysisPage() {
     Record<string, AnalysisRun[]>
   >({})
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
+
+  // Inline edit state: analysisId -> { name, prompt }
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editPrompt, setEditPrompt] = useState('')
+  const [savingId, setSavingId] = useState<string | null>(null)
 
   // Form state
   const [name, setName] = useState('')
@@ -100,6 +107,34 @@ export default function AnalysisPage() {
     }
   }
 
+  function startEdit(analysis: Analysis) {
+    setEditingId(analysis.id)
+    setEditName(analysis.name)
+    setEditPrompt(analysis.prompt)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+  }
+
+  async function saveEdit(id: string) {
+    setSavingId(id)
+    try {
+      const data: AnalysisUpdate = {
+        name: editName.trim() || undefined,
+        prompt: editPrompt.trim() || undefined,
+      }
+      const updated = await updateAnalysis(id, data)
+      setAnalyses((prev) => prev.map((a) => (a.id === id ? updated : a)))
+      setEditingId(null)
+      showToast('Analysis updated.', 'success')
+    } catch {
+      showToast('Failed to update analysis.', 'error')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   async function handleRun(analysisId: string) {
     setRunningIds((prev) => new Set(prev).add(analysisId))
     try {
@@ -154,6 +189,8 @@ export default function AnalysisPage() {
               {analyses.map((analysis) => {
                 const runs = runsByAnalysis[analysis.id]
                 const isRunning = runningIds.has(analysis.id)
+                const isEditing = editingId === analysis.id
+                const isSaving = savingId === analysis.id
                 const spotifyAcc = spotifyAccounts.find(
                   (s) => s.id === analysis.spotify_account_id,
                 )
@@ -166,57 +203,115 @@ export default function AnalysisPage() {
                     key={analysis.id}
                     className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 dark:bg-brand-800/50 dark:ring-brand-700"
                   >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-semibold text-gray-900 dark:text-white">
-                          {analysis.name}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-brand-300">
-                          {spotifyAcc?.display_name ?? analysis.spotify_account_id} ·{' '}
-                          {aiConf?.display_name ?? analysis.ai_config_id}
-                        </p>
-                        <p className="mt-1 line-clamp-2 text-sm text-gray-600 dark:text-brand-200">
-                          {analysis.prompt}
-                        </p>
+                    {isEditing ? (
+                      /* ── Edit mode ── */
+                      <div className="space-y-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-brand-300">
+                            Name
+                          </label>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-brand-300">
+                            Prompt
+                          </label>
+                          <textarea
+                            value={editPrompt}
+                            onChange={(e) => setEditPrompt(e.target.value)}
+                            rows={3}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => saveEdit(analysis.id)}
+                            disabled={isSaving}
+                            className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-400 disabled:opacity-50"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            {isSaving ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            disabled={isSaving}
+                            className="flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-700 transition hover:bg-gray-200 dark:bg-brand-700/50 dark:text-brand-200 dark:hover:bg-brand-700"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Cancel
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleDelete(analysis.id)}
-                        className="ml-3 rounded p-1.5 text-gray-400 transition hover:text-red-500 dark:text-brand-400 dark:hover:text-red-400"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+                    ) : (
+                      /* ── View mode ── */
+                      <>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="font-semibold text-gray-900 dark:text-white">
+                              {analysis.name}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-brand-300">
+                              {spotifyAcc?.display_name ?? analysis.spotify_account_id} ·{' '}
+                              {aiConf?.display_name ?? analysis.ai_config_id}
+                            </p>
+                            <p className="mt-1 line-clamp-2 text-sm text-gray-600 dark:text-brand-200">
+                              {analysis.prompt}
+                            </p>
+                          </div>
+                          <div className="ml-3 flex shrink-0 items-center gap-1">
+                            <button
+                              onClick={() => startEdit(analysis)}
+                              className="rounded p-1.5 text-gray-400 transition hover:text-brand-500 dark:text-brand-400 dark:hover:text-brand-300"
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(analysis.id)}
+                              className="rounded p-1.5 text-gray-400 transition hover:text-red-500 dark:text-brand-400 dark:hover:text-red-400"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
 
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        onClick={() => handleRun(analysis.id)}
-                        disabled={isRunning}
-                        className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-400 disabled:opacity-50"
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                        {isRunning ? 'Running…' : 'Run Now'}
-                      </button>
-                      <button
-                        onClick={() => handleLoadRuns(analysis.id)}
-                        className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-700 transition hover:bg-gray-200 dark:bg-brand-700/50 dark:text-brand-200 dark:hover:bg-brand-700"
-                      >
-                        View Runs
-                      </button>
-                    </div>
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={() => handleRun(analysis.id)}
+                            disabled={isRunning}
+                            className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-400 disabled:opacity-50"
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                            {isRunning ? 'Running…' : 'Run Now'}
+                          </button>
+                          <button
+                            onClick={() => handleLoadRuns(analysis.id)}
+                            className="rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-700 transition hover:bg-gray-200 dark:bg-brand-700/50 dark:text-brand-200 dark:hover:bg-brand-700"
+                          >
+                            View Runs
+                          </button>
+                        </div>
 
-                    {/* Runs */}
-                    {runs && runs.length > 0 && (
-                      <div className="mt-3 flex flex-col gap-2">
-                        {runs.map((run) => (
-                          <RunResultViewer key={run.id} run={run} />
-                        ))}
-                      </div>
-                    )}
-                    {runs && runs.length === 0 && (
-                      <p className="mt-2 text-xs text-gray-400 dark:text-brand-400">
-                        No runs yet.
-                      </p>
+                        {/* Runs */}
+                        {runs && runs.length > 0 && (
+                          <div className="mt-3 flex flex-col gap-2">
+                            {runs.map((run) => (
+                              <RunResultViewer key={run.id} run={run} />
+                            ))}
+                          </div>
+                        )}
+                        {runs && runs.length === 0 && (
+                          <p className="mt-2 text-xs text-gray-400 dark:text-brand-400">
+                            No runs yet.
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 )
@@ -340,3 +435,4 @@ export default function AnalysisPage() {
     </div>
   )
 }
+

@@ -329,3 +329,127 @@ async def test_tables_returns_row_counts_for_admin(
     for row in data["tables"]:
         assert "row_count" in row
         assert isinstance(row["row_count"], int)
+
+
+# ── GET /api/admin/users ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_users_requires_admin(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Regular users receive 403 when accessing the user list."""
+    _, token = await _make_user(db_session, fake_redis, sub="reg-user-list")
+    resp = await client.get(
+        "/api/admin/users",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_users_requires_auth(client: AsyncClient) -> None:
+    """Unauthenticated requests to /users are rejected with 401."""
+    resp = await client.get("/api/admin/users")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_list_users_returns_all_users(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Admin users receive a list of all users with summary counts."""
+    admin, admin_token = await _make_user(db_session, fake_redis, sub="admin-list-sub")
+    admin.role = "admin"
+    await db_session.commit()
+
+    # Create a second user
+    await _make_user(db_session, fake_redis, sub="other-list-sub", email="other@example.com")
+
+    resp = await client.get(
+        "/api/admin/users",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) >= 2
+    user_ids = [u["id"] for u in data]
+    assert str(admin.id) in user_ids
+
+    for entry in data:
+        assert "spotify_accounts_count" in entry
+        assert "analyses_count" in entry
+        assert "play_events_count" in entry
+
+
+# ── GET /api/admin/users/{user_id} ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_user_detail_requires_admin(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Regular users receive 403 when accessing user detail."""
+    user, token = await _make_user(db_session, fake_redis, sub="reg-detail-sub")
+    resp = await client.get(
+        f"/api/admin/users/{user.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_user_detail_not_found(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Returns 404 for an unknown user ID."""
+    admin, admin_token = await _make_user(db_session, fake_redis, sub="admin-detail-404")
+    admin.role = "admin"
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/admin/users/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_user_detail_returns_data(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Admin receives full user detail including Spotify accounts and analyses."""
+    admin, admin_token = await _make_user(db_session, fake_redis, sub="admin-detail-ok")
+    admin.role = "admin"
+    await db_session.commit()
+
+    target_user, _ = await _make_user(
+        db_session, fake_redis, sub="detail-target", email="target@example.com"
+    )
+    account = await _make_spotify_account(db_session, target_user)
+
+    resp = await client.get(
+        f"/api/admin/users/{target_user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == str(target_user.id)
+    assert data["email"] == "target@example.com"
+    assert "spotify_accounts" in data
+    assert "analyses" in data
+    assert "schedules" in data
+    assert len(data["spotify_accounts"]) == 1
+    assert data["spotify_accounts"][0]["id"] == str(account.id)
+    assert "play_events_count" in data["spotify_accounts"][0]
