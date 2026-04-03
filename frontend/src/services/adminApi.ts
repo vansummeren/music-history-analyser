@@ -44,6 +44,59 @@ export interface TestAIResponse {
   text: string
 }
 
+export interface AdminUserSummary {
+  id: string
+  display_name: string | null
+  email: string | null
+  role: string
+  created_at: string
+  spotify_accounts_count: number
+  analyses_count: number
+  schedules_count: number
+  play_events_count: number
+}
+
+export interface AdminSpotifyAccountSummary {
+  id: string
+  spotify_user_id: string
+  display_name: string | null
+  polling_enabled: boolean
+  last_polled_at: string | null
+  play_events_count: number
+}
+
+export interface AdminAnalysisSummary {
+  id: string
+  name: string
+  prompt: string
+  run_count: number
+  last_run_at: string | null
+  last_run_status: string | null
+}
+
+export interface AdminScheduleSummary {
+  id: string
+  analysis_id: string
+  analysis_name: string | null
+  cron: string
+  time_window_days: number
+  recipient_email: string
+  is_active: boolean
+  last_run_at: string | null
+  next_run_at: string
+}
+
+export interface AdminUserDetail {
+  id: string
+  display_name: string | null
+  email: string | null
+  role: string
+  created_at: string
+  spotify_accounts: AdminSpotifyAccountSummary[]
+  analyses: AdminAnalysisSummary[]
+  schedules: AdminScheduleSummary[]
+}
+
 /** Send a test email to verify SMTP connectivity. */
 export async function adminTestEmail(recipient: string): Promise<TestEmailResponse> {
   const resp = await api.post<TestEmailResponse>(
@@ -79,5 +132,21 @@ export async function adminTestAI(configId: string, prompt?: string): Promise<Te
     prompt ? { prompt } : {},
     { headers: authHeaders() },
   )
+  return resp.data
+}
+
+/** Fetch a summary list of all users (admin only). */
+export async function getAdminUsers(): Promise<AdminUserSummary[]> {
+  const resp = await api.get<AdminUserSummary[]>('/admin/users', {
+    headers: authHeaders(),
+  })
+  return resp.data
+}
+
+/** Fetch detailed information about a single user (admin only). */
+export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
+  const resp = await api.get<AdminUserDetail>(`/admin/users/${userId}`, {
+    headers: authHeaders(),
+  })
   return resp.data
 }

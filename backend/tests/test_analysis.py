@@ -591,3 +591,90 @@ async def test_run_succeeds_when_both_fetches_fail_but_ai_succeeds(
     assert "Could not fetch top tracks" in data["result_text"]
     assert "Could not fetch top artists" in data["result_text"]
     assert "Not enough data" in data["result_text"]
+
+
+# ── PATCH /api/analyses/{analysis_id} ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_analysis_name_and_prompt(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Owner can update the name and prompt of an analysis."""
+    user, token = await _make_user(db_session, fake_redis, sub="upd-analysis-sub")
+    account = await _make_spotify_account(db_session, user)
+    config = await _make_ai_config(db_session, user)
+    analysis = await _make_analysis(db_session, user, account, config)
+
+    resp = await client.patch(
+        f"/api/analyses/{analysis.id}",
+        json={"name": "Updated Name", "prompt": "New prompt text"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "Updated Name"
+    assert data["prompt"] == "New prompt text"
+
+
+@pytest.mark.asyncio
+async def test_update_analysis_partial(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Partial updates (only name) are supported."""
+    user, token = await _make_user(db_session, fake_redis, sub="upd-partial-sub")
+    account = await _make_spotify_account(db_session, user)
+    config = await _make_ai_config(db_session, user)
+    analysis = await _make_analysis(db_session, user, account, config)
+    original_prompt = analysis.prompt
+
+    resp = await client.patch(
+        f"/api/analyses/{analysis.id}",
+        json={"name": "Only Name Updated"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["name"] == "Only Name Updated"
+    assert data["prompt"] == original_prompt
+
+
+@pytest.mark.asyncio
+async def test_update_analysis_forbidden_for_other_user(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Users cannot update analyses belonging to other users."""
+    owner, _ = await _make_user(db_session, fake_redis, sub="owner-upd")
+    _, other_token = await _make_user(db_session, fake_redis, sub="other-upd")
+    account = await _make_spotify_account(db_session, owner)
+    config = await _make_ai_config(db_session, owner)
+    analysis = await _make_analysis(db_session, owner, account, config)
+
+    resp = await client.patch(
+        f"/api/analyses/{analysis.id}",
+        json={"name": "Stolen Name"},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_analysis_not_found(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Returns 404 when the analysis does not exist."""
+    _, token = await _make_user(db_session, fake_redis, sub="404-upd-sub")
+    resp = await client.patch(
+        f"/api/analyses/{uuid.uuid4()}",
+        json={"name": "Ghost"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404

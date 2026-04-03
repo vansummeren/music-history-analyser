@@ -12,9 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, require_role
 from app.models.ai_config import AIConfig
+from app.models.analysis import Analysis, AnalysisRun
+from app.models.listening_history import PlayEvent
+from app.models.schedule import Schedule
 from app.models.spotify_account import SpotifyAccount
 from app.models.user import User
 from app.schemas.admin import (
+    AdminAnalysisSummary,
+    AdminScheduleSummary,
+    AdminSpotifyAccountSummary,
+    AdminUserDetail,
+    AdminUserSummary,
     TableRow,
     TablesResponse,
     TestAIRequest,
@@ -191,4 +199,192 @@ async def test_ai(
         input_tokens=ai_result.input_tokens,
         output_tokens=ai_result.output_tokens,
         text=ai_result.text,
+    )
+
+
+# ── GET /api/admin/users ──────────────────────────────────────────────────────
+
+
+@router.get("/users", response_model=list[AdminUserSummary])
+async def list_users(
+    _user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> list[AdminUserSummary]:
+    """Return a summary of all users (admin only)."""
+    # Build per-user counts in a single query using correlated subqueries.
+    spotify_sub = (
+        select(func.count())
+        .select_from(SpotifyAccount)
+        .where(SpotifyAccount.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    analyses_sub = (
+        select(func.count())
+        .select_from(Analysis)
+        .where(Analysis.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    schedules_sub = (
+        select(func.count())
+        .select_from(Schedule)
+        .where(Schedule.user_id == User.id)
+        .correlate(User)
+        .scalar_subquery()
+    )
+    # Play events are linked via spotify_accounts; use a two-level subquery.
+    pe_account_sub = (
+        select(SpotifyAccount.id).where(SpotifyAccount.user_id == User.id).correlate(User)
+    )
+    play_events_sub = (
+        select(func.count())
+        .select_from(PlayEvent)
+        .where(PlayEvent.streaming_account_id.in_(pe_account_sub))
+        .correlate(User)
+        .scalar_subquery()
+    )
+
+    result = await db.execute(
+        select(
+            User,
+            spotify_sub.label("spotify_accounts_count"),
+            analyses_sub.label("analyses_count"),
+            schedules_sub.label("schedules_count"),
+            play_events_sub.label("play_events_count"),
+        ).order_by(User.created_at)
+    )
+
+    return [
+        AdminUserSummary(
+            id=u.id,
+            display_name=u.display_name,
+            email=u.email,
+            role=u.role,
+            created_at=u.created_at,
+            spotify_accounts_count=int(sa_count),
+            analyses_count=int(an_count),
+            schedules_count=int(sc_count),
+            play_events_count=int(pe_count),
+        )
+        for u, sa_count, an_count, sc_count, pe_count in result.all()
+    ]
+
+
+# ── GET /api/admin/users/{user_id} ────────────────────────────────────────────
+
+
+@router.get("/users/{user_id}", response_model=AdminUserDetail)
+async def get_user_detail(
+    user_id: uuid.UUID,
+    _user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> AdminUserDetail:
+    """Return detailed information about a user (admin only)."""
+    u = await db.get(User, user_id)
+    if u is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Spotify accounts with play-event counts in one query per account (JOIN).
+    pe_count_sub = (
+        select(func.count())
+        .select_from(PlayEvent)
+        .where(PlayEvent.streaming_account_id == SpotifyAccount.id)
+        .correlate(SpotifyAccount)
+        .scalar_subquery()
+    )
+    accounts_result = await db.execute(
+        select(SpotifyAccount, pe_count_sub.label("play_events_count"))
+        .where(SpotifyAccount.user_id == user_id)
+        .order_by(SpotifyAccount.id)
+    )
+    spotify_summaries: list[AdminSpotifyAccountSummary] = [
+        AdminSpotifyAccountSummary(
+            id=acc.id,
+            spotify_user_id=acc.spotify_user_id,
+            display_name=acc.display_name,
+            polling_enabled=acc.polling_enabled,
+            last_polled_at=acc.last_polled_at,
+            play_events_count=int(pe_count),
+        )
+        for acc, pe_count in accounts_result.all()
+    ]
+
+    # Analyses: run count + latest run info, fetched with subqueries.
+    run_count_sub = (
+        select(func.count())
+        .select_from(AnalysisRun)
+        .where(AnalysisRun.analysis_id == Analysis.id)
+        .correlate(Analysis)
+        .scalar_subquery()
+    )
+    latest_run_at_sub = (
+        select(AnalysisRun.created_at)
+        .where(AnalysisRun.analysis_id == Analysis.id)
+        .correlate(Analysis)
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    latest_run_status_sub = (
+        select(AnalysisRun.status)
+        .where(AnalysisRun.analysis_id == Analysis.id)
+        .correlate(Analysis)
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    analyses_result = await db.execute(
+        select(
+            Analysis,
+            run_count_sub.label("run_count"),
+            latest_run_at_sub.label("last_run_at"),
+            latest_run_status_sub.label("last_run_status"),
+        )
+        .where(Analysis.user_id == user_id)
+        .order_by(Analysis.created_at)
+    )
+    analysis_summaries: list[AdminAnalysisSummary] = [
+        AdminAnalysisSummary(
+            id=an.id,
+            name=an.name,
+            prompt=an.prompt,
+            run_count=int(run_count),
+            last_run_at=last_run_at,
+            last_run_status=last_run_status,
+        )
+        for an, run_count, last_run_at, last_run_status in analyses_result.all()
+    ]
+
+    # Schedules joined with their analysis name in one query.
+    schedules_result = await db.execute(
+        select(Schedule, Analysis.name.label("analysis_name"))
+        .join(Analysis, Analysis.id == Schedule.analysis_id, isouter=True)
+        .where(Schedule.user_id == user_id)
+        .order_by(Schedule.created_at)
+    )
+    schedule_summaries: list[AdminScheduleSummary] = [
+        AdminScheduleSummary(
+            id=sc.id,
+            analysis_id=sc.analysis_id,
+            analysis_name=analysis_name,
+            cron=sc.cron,
+            time_window_days=sc.time_window_days,
+            recipient_email=sc.recipient_email,
+            is_active=sc.is_active,
+            last_run_at=sc.last_run_at,
+            next_run_at=sc.next_run_at,
+        )
+        for sc, analysis_name in schedules_result.all()
+    ]
+
+    return AdminUserDetail(
+        id=u.id,
+        display_name=u.display_name,
+        email=u.email,
+        role=u.role,
+        created_at=u.created_at,
+        spotify_accounts=spotify_summaries,
+        analyses=analysis_summaries,
+        schedules=schedule_summaries,
     )

@@ -19,6 +19,11 @@ export interface AnalysisCreate {
   prompt: string
 }
 
+export interface AnalysisUpdate {
+  name?: string
+  prompt?: string
+}
+
 export interface AnalysisRun {
   id: string
   analysis_id: string
@@ -57,6 +62,14 @@ export async function getAnalyses(): Promise<Analysis[]> {
 /** Delete an analysis by ID. */
 export async function deleteAnalysis(id: string): Promise<void> {
   await api.delete(`/analyses/${id}`, { headers: authHeaders() })
+}
+
+/** Update an analysis name and/or prompt. */
+export async function updateAnalysis(id: string, data: AnalysisUpdate): Promise<Analysis> {
+  const resp = await api.patch<Analysis>(`/analyses/${id}`, data, {
+    headers: authHeaders(),
+  })
+  return resp.data
 }
 
 /** Trigger an analysis run and return the run record. */

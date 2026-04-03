@@ -11,7 +11,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.ai_config import AIConfig
 from app.models.user import User
-from app.schemas.ai import AIConfigCreate, AIConfigRead
+from app.schemas.ai import AIConfigCreate, AIConfigRead, AIConfigUpdate
 from app.services import crypto
 
 router = APIRouter(prefix="/api/ai-configs", tags=["ai-configs"])
@@ -44,6 +44,31 @@ async def list_ai_configs(
     """Return all AI configurations belonging to the authenticated user."""
     result = await db.execute(select(AIConfig).where(AIConfig.user_id == user.id))
     return list(result.scalars().all())
+
+
+@router.patch("/{config_id}", response_model=AIConfigRead)
+async def update_ai_config(
+    config_id: uuid.UUID,
+    body: AIConfigUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AIConfig:
+    """Update an AI configuration's display name and/or API key."""
+    config = await db.get(AIConfig, config_id)
+    if config is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Config not found")
+    if config.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this config",
+        )
+    if body.display_name is not None:
+        config.display_name = body.display_name
+    if body.api_key is not None:
+        config.encrypted_api_key = crypto.encrypt(body.api_key)
+    await db.commit()
+    await db.refresh(config)
+    return config
 
 
 @router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)

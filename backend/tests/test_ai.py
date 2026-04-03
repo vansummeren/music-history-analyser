@@ -212,3 +212,80 @@ async def test_api_key_stored_encrypted(
     config = result.scalar_one()
     assert config.encrypted_api_key != "secret-key"
     assert crypto.decrypt(config.encrypted_api_key) == "secret-key"
+
+
+# ── PATCH /api/ai-configs/{id} ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_update_ai_config_display_name(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Owner can update the display name of an AI config."""
+    user, token = await _make_user(db_session, fake_redis, sub="upd-ai-sub")
+    config = await _make_ai_config(db_session, user, display_name="Old Name")
+
+    resp = await client.patch(
+        f"/api/ai-configs/{config.id}",
+        json={"display_name": "New Name"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["display_name"] == "New Name"
+
+
+@pytest.mark.asyncio
+async def test_update_ai_config_api_key(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Owner can rotate the API key; new key is encrypted at rest."""
+    user, token = await _make_user(db_session, fake_redis, sub="upd-key-sub")
+    config = await _make_ai_config(db_session, user, api_key="old-key")
+
+    resp = await client.patch(
+        f"/api/ai-configs/{config.id}",
+        json={"api_key": "new-key"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    await db_session.refresh(config)
+    assert crypto.decrypt(config.encrypted_api_key) == "new-key"
+
+
+@pytest.mark.asyncio
+async def test_update_ai_config_forbidden_for_other_user(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Users cannot update AI configs belonging to other users."""
+    owner, _ = await _make_user(db_session, fake_redis, sub="owner-ai-upd")
+    _, other_token = await _make_user(db_session, fake_redis, sub="other-ai-upd")
+    config = await _make_ai_config(db_session, owner)
+
+    resp = await client.patch(
+        f"/api/ai-configs/{config.id}",
+        json={"display_name": "Stolen"},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_ai_config_not_found(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    """Returns 404 when the AI config does not exist."""
+    _, token = await _make_user(db_session, fake_redis, sub="404-ai-sub")
+    resp = await client.patch(
+        f"/api/ai-configs/{uuid.uuid4()}",
+        json={"display_name": "Ghost"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
