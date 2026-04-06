@@ -4,8 +4,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select, text
 from sqlalchemy import table as sa_table
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_role
 from app.models.ai_config import AIConfig
 from app.models.analysis import Analysis, AnalysisRun
+from app.models.app_log import AppLog
 from app.models.listening_history import PlayEvent
 from app.models.schedule import Schedule
 from app.models.spotify_account import SpotifyAccount
@@ -23,7 +24,11 @@ from app.schemas.admin import (
     AdminSpotifyAccountSummary,
     AdminUserDetail,
     AdminUserSummary,
+    AppLogRead,  # noqa: F401 - re-exported for API responses
+    AppLogsResponse,
+    DbStatsResponse,
     TableRow,
+    TableSizeRow,
     TablesResponse,
     TestAIRequest,
     TestAIResponse,
@@ -63,6 +68,7 @@ _ADMIN_TABLES = [
     "albums",
     "tracks",
     "play_events",
+    "app_logs",
 ]
 
 
@@ -387,4 +393,135 @@ async def get_user_detail(
         spotify_accounts=spotify_summaries,
         analyses=analysis_summaries,
         schedules=schedule_summaries,
+    )
+
+
+# ── GET /api/admin/logs ───────────────────────────────────────────────────────
+
+
+@router.get("/logs", response_model=AppLogsResponse)
+async def get_logs(
+    level: str | None = Query(default=None, description="Filter by log level (e.g. ERROR)"),
+    service: str | None = Query(default=None, description="Filter by service name"),
+    search: str | None = Query(default=None, description="Substring search in message or logger"),
+    since: datetime | None = Query(default=None, description="Only records at or after this time"),
+    until: datetime | None = Query(default=None, description="Only records before or at this time"),
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    _user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> AppLogsResponse:
+    """Return paginated application log records (admin only)."""
+    filters = []
+    if level:
+        filters.append(AppLog.level == level.upper())
+    if service:
+        filters.append(AppLog.service == service)
+    if search:
+        pattern = f"%{search}%"
+        filters.append(
+            (AppLog.message.ilike(pattern)) | (AppLog.logger_name.ilike(pattern))
+        )
+    if since:
+        filters.append(AppLog.created_at >= since)
+    if until:
+        filters.append(AppLog.created_at <= until)
+
+    count_q = select(func.count()).select_from(AppLog)
+    items_q = (
+        select(AppLog)
+        .order_by(AppLog.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    if filters:
+        from sqlalchemy import and_
+        condition = and_(*filters)
+        count_q = count_q.where(condition)
+        items_q = items_q.where(condition)
+
+    total: int = (await db.execute(count_q)).scalar_one()
+    orm_items = list((await db.execute(items_q)).scalars().all())
+
+    return AppLogsResponse(
+        total=total,
+        items=[AppLogRead.model_validate(r) for r in orm_items],
+    )
+
+
+# ── GET /api/admin/db-stats ───────────────────────────────────────────────────
+
+
+@router.get("/db-stats", response_model=DbStatsResponse)
+async def get_db_stats(
+    _user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> DbStatsResponse:
+    """Return database size statistics (admin only).
+
+    Size columns are populated for PostgreSQL backends; they are ``null`` for
+    other databases (e.g. SQLite used in tests).
+    """
+    from app.config import settings
+
+    # -- Row counts (works everywhere) --
+    row_counts: dict[str, int] = {}
+    for table_name in _ADMIN_TABLES:
+        result = await db.execute(select(func.count()).select_from(sa_table(table_name)))
+        row_counts[table_name] = result.scalar_one()
+
+    # -- Sizes (PostgreSQL only) --
+    db_size: int | None = None
+    table_sizes: dict[str, dict[str, int]] = {}
+
+    try:
+        # Total database size
+        db_size_row = await db.execute(
+            text("SELECT pg_database_size(current_database())")
+        )
+        db_size = db_size_row.scalar_one()
+
+        # Per-table sizes
+        size_sql = text(
+            """
+            SELECT
+                relname,
+                pg_total_relation_size(c.oid) AS total_size,
+                pg_relation_size(c.oid)        AS table_size,
+                pg_indexes_size(c.oid)         AS index_size
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public'
+              AND c.relkind = 'r'
+              AND c.relname = ANY(:names)
+            """
+        )
+        rows = await db.execute(size_sql, {"names": _ADMIN_TABLES})
+        for row in rows:
+            table_sizes[row[0]] = {
+                "total": int(row[1]),
+                "table": int(row[2]),
+                "index": int(row[3]),
+            }
+    except Exception:  # noqa: BLE001
+        # Non-PostgreSQL backend — size data stays None
+        pass
+
+    table_rows: list[TableSizeRow] = []
+    for table_name in _ADMIN_TABLES:
+        sizes = table_sizes.get(table_name)
+        table_rows.append(
+            TableSizeRow(
+                table=table_name,
+                row_count=row_counts.get(table_name, 0),
+                total_size_bytes=sizes["total"] if sizes else None,
+                table_size_bytes=sizes["table"] if sizes else None,
+                index_size_bytes=sizes["index"] if sizes else None,
+            )
+        )
+
+    return DbStatsResponse(
+        database_size_bytes=db_size,
+        tables=table_rows,
+        log_retention_days=settings.log_retention_days,
     )

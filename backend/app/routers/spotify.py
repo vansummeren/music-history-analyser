@@ -465,6 +465,13 @@ async def update_poll_config(
         account.poll_interval_minutes = payload.poll_interval_minutes
     if payload.polling_enabled is not None:
         account.polling_enabled = payload.polling_enabled
+    if payload.poll_schedule is not None:
+        # An empty list clears the schedule (reverts to simple interval).
+        account.poll_schedule = (
+            [rule.model_dump() for rule in payload.poll_schedule]
+            if payload.poll_schedule
+            else None
+        )
     account.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(account)

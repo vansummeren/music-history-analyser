@@ -22,7 +22,7 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 
 # ── production image ─────────────────────────────────────────────────────────
 FROM deps AS production
-ARG APP_VERSION=1.0.4
+ARG APP_VERSION=1.0.5
 ARG BUILD_NUMBER=dev
 ARG BUILD_DATE=unknown
 ENV APP_VERSION=${APP_VERSION} \

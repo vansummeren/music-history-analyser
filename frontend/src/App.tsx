@@ -11,6 +11,7 @@ import AnalysisPage from './pages/AnalysisPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
 import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
+import LogsPage from './pages/LogsPage'
 import RunResultPage from './pages/RunResultPage'
 import SchedulesPage from './pages/SchedulesPage'
 import SpotifyAccountsPage from './pages/SpotifyAccountsPage'
@@ -46,6 +47,14 @@ export default function App() {
               element={
                 <AdminRoute>
                   <AdminPanelPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="logs"
+              element={
+                <AdminRoute>
+                  <LogsPage />
                 </AdminRoute>
               }
             />
