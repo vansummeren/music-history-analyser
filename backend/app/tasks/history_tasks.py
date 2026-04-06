@@ -20,17 +20,22 @@ def poll_history_for_account(self: Task, account_id: str) -> dict[str, object]:
     If Spotify responds with HTTP 429 the task is automatically retried after
     the number of seconds indicated by the ``Retry-After`` response header.
     """
+    from app.config import settings
     from app.services.music.spotify import SpotifyRateLimitError
 
     try:
         return asyncio.run(_poll(uuid.UUID(account_id)))
     except SpotifyRateLimitError as exc:
+        countdown = exc.retry_after + settings.spotify_retry_extra_seconds
         logger.warning(
-            "Rate limited by Spotify for account %s; scheduling retry in %ds",
+            "Rate limited by Spotify for account %s; scheduling retry in %ds"
+            " (%ds Retry-After + %ds extra)",
             account_id,
+            countdown,
             exc.retry_after,
+            settings.spotify_retry_extra_seconds,
         )
-        raise self.retry(countdown=exc.retry_after, exc=exc) from exc
+        raise self.retry(countdown=countdown, exc=exc) from exc
 
 
 async def _poll(account_id: uuid.UUID) -> dict[str, object]:

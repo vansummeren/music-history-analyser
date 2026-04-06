@@ -97,6 +97,48 @@ export interface AdminUserDetail {
   schedules: AdminScheduleSummary[]
 }
 
+// ── Application logs ──────────────────────────────────────────────────────────
+
+export interface AppLogEntry {
+  id: string
+  created_at: string
+  level: string
+  service: string
+  logger_name: string
+  message: string
+}
+
+export interface AppLogsResponse {
+  total: number
+  items: AppLogEntry[]
+}
+
+export interface LogsFilter {
+  level?: string
+  service?: string
+  search?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+}
+
+// ── Database statistics ───────────────────────────────────────────────────────
+
+export interface TableSizeRow {
+  table: string
+  row_count: number
+  total_size_bytes: number | null
+  table_size_bytes: number | null
+  index_size_bytes: number | null
+}
+
+export interface DbStatsResponse {
+  database_size_bytes: number | null
+  tables: TableSizeRow[]
+  log_retention_days: number
+}
+
 /** Send a test email to verify SMTP connectivity. */
 export async function adminTestEmail(recipient: string): Promise<TestEmailResponse> {
   const resp = await api.post<TestEmailResponse>(
@@ -146,6 +188,32 @@ export async function getAdminUsers(): Promise<AdminUserSummary[]> {
 /** Fetch detailed information about a single user (admin only). */
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
   const resp = await api.get<AdminUserDetail>(`/admin/users/${userId}`, {
+    headers: authHeaders(),
+  })
+  return resp.data
+}
+
+/** Fetch paginated application log entries (admin only). */
+export async function getAdminLogs(filter: LogsFilter = {}): Promise<AppLogsResponse> {
+  const params: Record<string, string | number> = {}
+  if (filter.level) params.level = filter.level
+  if (filter.service) params.service = filter.service
+  if (filter.search) params.search = filter.search
+  if (filter.since) params.since = filter.since
+  if (filter.until) params.until = filter.until
+  if (filter.limit !== undefined) params.limit = filter.limit
+  if (filter.offset !== undefined) params.offset = filter.offset
+
+  const resp = await api.get<AppLogsResponse>('/admin/logs', {
+    headers: authHeaders(),
+    params,
+  })
+  return resp.data
+}
+
+/** Fetch database size statistics (admin only). */
+export async function getDbStats(): Promise<DbStatsResponse> {
+  const resp = await api.get<DbStatsResponse>('/admin/db-stats', {
     headers: authHeaders(),
   })
   return resp.data

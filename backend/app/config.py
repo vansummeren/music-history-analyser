@@ -79,8 +79,18 @@ class Settings(BaseSettings):
     # Accepted values: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_level: str = "INFO"
 
+    # Centralised DB logging
+    # Human-readable name for the running service (backend / worker / beat …)
+    service_name: str = "backend"
+    # How many days of application logs to keep; older rows are purged by the cleanup job.
+    log_retention_days: int = 30
+
+    # Spotify rate-limit retry
+    # Extra seconds to wait on top of Spotify's ``Retry-After`` header before retrying.
+    spotify_retry_extra_seconds: int = 0
+
     # Build / version info (injected at image-build time via ARG → ENV)
-    app_version: str = "1.0.4"
+    app_version: str = "1.0.5"
     build_number: str = "dev"
     build_date: str = "unknown"
 

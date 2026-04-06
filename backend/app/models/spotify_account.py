@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -34,6 +35,14 @@ class SpotifyAccount(Base):
     # Spotify recently-played endpoint to avoid re-importing duplicate events).
     last_polled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
+    )
+    # Optional time-window schedule that overrides ``poll_interval_minutes``.
+    # When set, each rule is evaluated against the current UTC day/hour to
+    # determine the effective polling interval.
+    # Schema: list of {days: int[], start_hour: int, end_hour: int, interval_minutes: int}
+    # days: 0=Mon … 6=Sun; end_hour is exclusive (24 = end of day).
+    poll_schedule: Mapped[list[Any] | None] = mapped_column(
+        JSON, nullable=True, default=None
     )
 
     created_at: Mapped[datetime] = mapped_column(

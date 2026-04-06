@@ -57,6 +57,19 @@ def _configure_logging() -> None:
 
 _configure_logging()
 
+# Attach the database log handler immediately after logging is configured.
+# This makes the backend container store its own records in the DB.
+def _attach_db_log_handler() -> None:
+    """Attach DatabaseLogHandler to the root logger."""
+    from app.services.log_handler import DatabaseLogHandler
+
+    handler = DatabaseLogHandler()
+    handler.setLevel(logging.INFO)
+    logging.getLogger().addHandler(handler)
+
+
+_attach_db_log_handler()
+
 logger = logging.getLogger(__name__)
 
 

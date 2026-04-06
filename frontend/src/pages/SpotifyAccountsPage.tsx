@@ -71,6 +71,10 @@ export default function SpotifyAccountsPage() {
     setAccounts((prev) => prev.filter((a) => a.id !== id))
   }
 
+  function handleUpdated(updated: SpotifyAccount) {
+    setAccounts((prev) => prev.map((a) => (a.id === updated.id ? updated : a)))
+  }
+
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center justify-between">
@@ -113,6 +117,7 @@ export default function SpotifyAccountsPage() {
                 key={account.id}
                 account={account}
                 onUnlinked={handleUnlinked}
+                onUpdated={handleUpdated}
               />
             ))}
           </div>

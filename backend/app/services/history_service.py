@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -237,20 +238,68 @@ async def poll_account(db: AsyncSession, account_id: uuid.UUID) -> int:
 # ── Query helpers ──────────────────────────────────────────────────────────────
 
 
-async def get_accounts_due_for_poll(db: AsyncSession) -> list[SpotifyAccount]:
-    """Return all accounts whose next scheduled poll is due now or overdue."""
-    from sqlalchemy import func, or_
+def _effective_interval_minutes(
+    account: SpotifyAccount, now: datetime
+) -> int:
+    """Return the effective polling interval in minutes for *account* at *now*.
 
+    If the account has a ``poll_schedule`` defined, the first matching rule
+    (by day-of-week and hour window) wins.  Falls back to
+    ``poll_interval_minutes`` when no rule matches or the schedule is empty.
+
+    Rule schema::
+
+        {
+            "days": [0, 1, 2, 3, 4],   # 0=Mon … 6=Sun
+            "start_hour": 0,            # inclusive, 0–23
+            "end_hour": 17,             # exclusive, 1–24
+            "interval_minutes": 120
+        }
+    """
+    schedule: list[Any] | None = account.poll_schedule
+    if not schedule:
+        return account.poll_interval_minutes
+
+    weekday = now.weekday()  # 0=Mon, 6=Sun
+    hour = now.hour          # 0–23
+
+    for rule in schedule:
+        if not isinstance(rule, dict):
+            continue
+        days = rule.get("days", [])
+        start = int(rule.get("start_hour", 0))
+        end = int(rule.get("end_hour", 24))
+        interval = int(rule.get("interval_minutes", account.poll_interval_minutes))
+        if weekday in days and start <= hour < end:
+            return interval
+
+    return account.poll_interval_minutes
+
+
+async def get_accounts_due_for_poll(db: AsyncSession) -> list[SpotifyAccount]:
+    """Return all accounts whose next scheduled poll is due now or overdue.
+
+    Accounts that have a ``poll_schedule`` are evaluated in Python against the
+    current UTC time so that the effective interval can vary by day/hour.
+    Accounts without a schedule use the simple ``poll_interval_minutes`` column.
+    """
     result = await db.execute(
-        select(SpotifyAccount).where(
-            SpotifyAccount.polling_enabled.is_(True),
-            or_(
-                SpotifyAccount.last_polled_at.is_(None),
-                # next_poll = last_polled_at + poll_interval_minutes * 60 seconds
-                func.now()
-                >= SpotifyAccount.last_polled_at
-                + func.make_interval(0, 0, 0, 0, 0, SpotifyAccount.poll_interval_minutes),
-            ),
-        )
+        select(SpotifyAccount).where(SpotifyAccount.polling_enabled.is_(True))
     )
-    return list(result.scalars().all())
+    accounts = list(result.scalars().all())
+
+    now = datetime.now(UTC)
+    due: list[SpotifyAccount] = []
+
+    for account in accounts:
+        last = account.last_polled_at
+        if last is None:
+            due.append(account)
+            continue
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        interval = _effective_interval_minutes(account, now)
+        if now >= last + timedelta(minutes=interval):
+            due.append(account)
+
+    return due

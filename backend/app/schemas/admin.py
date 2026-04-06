@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ── Request bodies ────────────────────────────────────────────────────────────
 
@@ -115,3 +115,43 @@ class AdminUserDetail(BaseModel):
     spotify_accounts: list[AdminSpotifyAccountSummary]
     analyses: list[AdminAnalysisSummary]
     schedules: list[AdminScheduleSummary]
+
+
+# ── Application logs ──────────────────────────────────────────────────────────
+
+
+class AppLogRead(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    created_at: datetime
+    level: str
+    service: str
+    logger_name: str
+    message: str
+
+
+class AppLogsResponse(BaseModel):
+    total: int
+    items: list[AppLogRead]
+
+
+# ── Database statistics ───────────────────────────────────────────────────────
+
+
+class TableSizeRow(BaseModel):
+    table: str
+    row_count: int
+    # Sizes in bytes; None when the backend DB is not PostgreSQL
+    total_size_bytes: int | None = None
+    table_size_bytes: int | None = None
+    index_size_bytes: int | None = None
+
+
+class DbStatsResponse(BaseModel):
+    # Total database size in bytes; None for non-PostgreSQL backends
+    database_size_bytes: int | None = None
+    tables: list[TableSizeRow]
+    log_retention_days: int = Field(
+        description="Configured log-retention period in days"
+    )

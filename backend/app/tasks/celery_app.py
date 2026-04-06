@@ -49,7 +49,12 @@ celery_app = Celery(
     "music_history_analyser",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.analysis_tasks", "app.tasks.scheduler", "app.tasks.history_tasks"],
+    include=[
+        "app.tasks.analysis_tasks",
+        "app.tasks.scheduler",
+        "app.tasks.history_tasks",
+        "app.tasks.maintenance_tasks",
+    ],
 )
 
 celery_app.conf.update(
@@ -68,6 +73,10 @@ celery_app.conf.update(
             "task": "check_due_history_polls",
             "schedule": crontab(),  # every minute — per-account interval enforced in service
         },
+        "cleanup-old-logs-daily": {
+            "task": "cleanup_old_logs",
+            "schedule": crontab(hour="3", minute="0"),  # 03:00 UTC every day
+        },
     },
 )
 
@@ -75,6 +84,12 @@ celery_app.conf.update(
 @worker_ready.connect  # type: ignore
 def _on_worker_ready(sender: Any, **kwargs: Any) -> None:
     """Log non-sensitive configuration when the Celery worker comes online."""
+    # Install the database log handler for the worker process
+    from app.services.log_handler import DatabaseLogHandler
+    db_handler = DatabaseLogHandler()
+    db_handler.setLevel(logging.INFO)
+    logging.getLogger().addHandler(db_handler)
+
     sep = "=" * 54
     lines: list[str] = [
         "",

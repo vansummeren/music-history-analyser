@@ -5,12 +5,20 @@ import { useToast } from '../hooks/useToast'
 import type {
   AdminUserDetail,
   AdminUserSummary,
+  DbStatsResponse,
   TableRow,
 } from '../services/adminApi'
-import { getAdminUserDetail, getAdminUsers, getTableStats } from '../services/adminApi'
+import { getAdminUserDetail, getAdminUsers, getDbStats, getTableStats } from '../services/adminApi'
 
 const cardClass =
   'rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-200 dark:bg-brand-800/50 dark:ring-brand-700'
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
 
 function StatusBadge({ status }: { status: string }) {
   const colours: Record<string, string> = {
@@ -190,6 +198,8 @@ export default function AdminPanelPage() {
   const { showToast } = useToast()
   const [tables, setTables] = useState<TableRow[]>([])
   const [loadingTables, setLoadingTables] = useState(true)
+  const [dbStats, setDbStats] = useState<DbStatsResponse | null>(null)
+  const [loadingDbStats, setLoadingDbStats] = useState(true)
   const [users, setUsers] = useState<AdminUserSummary[]>([])
   const [loadingUsers, setLoadingUsers] = useState(true)
   const [selectedUser, setSelectedUser] = useState<AdminUserDetail | null>(null)
@@ -200,6 +210,11 @@ export default function AdminPanelPage() {
       .then((data) => setTables(data.tables))
       .catch(() => showToast('Failed to load table stats.', 'error'))
       .finally(() => setLoadingTables(false))
+
+    getDbStats()
+      .then((data) => setDbStats(data))
+      .catch(() => {/* DB stats are optional */})
+      .finally(() => setLoadingDbStats(false))
 
     getAdminUsers()
       .then((data) => setUsers(data))
@@ -269,6 +284,65 @@ export default function AdminPanelPage() {
               ))}
             </tbody>
           </table>
+        )}
+      </section>
+
+      {/* Database statistics */}
+      <section className={cardClass}>
+        <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
+          Database Statistics
+        </h2>
+        {loadingDbStats ? (
+          <LoadingSkeleton lines={4} />
+        ) : dbStats ? (
+          <div className="space-y-3">
+            {dbStats.database_size_bytes !== null && (
+              <p className="text-sm text-gray-600 dark:text-brand-300">
+                <span className="font-medium text-gray-900 dark:text-white">Total database size:</span>{' '}
+                {formatBytes(dbStats.database_size_bytes)}
+              </p>
+            )}
+            <p className="text-sm text-gray-600 dark:text-brand-300">
+              <span className="font-medium text-gray-900 dark:text-white">Log retention:</span>{' '}
+              {dbStats.log_retention_days} days
+            </p>
+            {dbStats.tables.some((t) => t.total_size_bytes !== null) && (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 dark:border-brand-700">
+                    <th className="pb-2 text-left font-semibold text-gray-700 dark:text-brand-200">Table</th>
+                    <th className="pb-2 text-right font-semibold text-gray-700 dark:text-brand-200">Rows</th>
+                    <th className="pb-2 text-right font-semibold text-gray-700 dark:text-brand-200">Data</th>
+                    <th className="pb-2 text-right font-semibold text-gray-700 dark:text-brand-200">Indexes</th>
+                    <th className="pb-2 text-right font-semibold text-gray-700 dark:text-brand-200">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dbStats.tables.map((t) => (
+                    <tr key={t.table} className="border-b border-gray-100 last:border-0 dark:border-brand-800">
+                      <td className="py-2 font-mono text-gray-800 dark:text-brand-100">{t.table}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600 dark:text-brand-300">
+                        {t.row_count.toLocaleString()}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-gray-500 dark:text-brand-400">
+                        {t.table_size_bytes !== null ? formatBytes(t.table_size_bytes) : '—'}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-gray-500 dark:text-brand-400">
+                        {t.index_size_bytes !== null ? formatBytes(t.index_size_bytes) : '—'}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-gray-600 dark:text-brand-300">
+                        {t.total_size_bytes !== null ? formatBytes(t.total_size_bytes) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400 dark:text-brand-500">
+            Database statistics not available.
+          </p>
         )}
       </section>
 
