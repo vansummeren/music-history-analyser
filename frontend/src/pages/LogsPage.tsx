@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, RefreshCw, Search } from 'lucide-react'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import { useToast } from '../hooks/useToast'
 import type { AppLogEntry, LogsFilter } from '../services/adminApi'
-import { getAdminLogs } from '../services/adminApi'
+import { getAdminLogs, getAdminLogServices } from '../services/adminApi'
 
 const LEVELS = ['', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
 const PAGE_SIZE = 100
@@ -25,30 +25,64 @@ export default function LogsPage() {
 
   // Filter state
   const [level, setLevel] = useState('')
-  const [service, setService] = useState('')
+  const [selectedServices, setSelectedServices] = useState<string[]>([])
+  const [availableServices, setAvailableServices] = useState<string[]>([])
+  const [serviceDropdownOpen, setServiceDropdownOpen] = useState(false)
+  const serviceDropdownRef = useRef<HTMLDivElement>(null)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // AbortController ref — cancels the previous in-flight request before starting a new one
+  const abortRef = useRef<AbortController | null>(null)
+
   const load = useCallback(
     async (currentPage: number, filter: LogsFilter) => {
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+
       setLoading(true)
       try {
-        const result = await getAdminLogs({
-          ...filter,
-          limit: PAGE_SIZE,
-          offset: currentPage * PAGE_SIZE,
-        })
+        const result = await getAdminLogs(
+          {
+            ...filter,
+            limit: PAGE_SIZE,
+            offset: currentPage * PAGE_SIZE,
+          },
+          controller.signal,
+        )
         setLogs(result.items)
         setTotal(result.total)
       } catch {
+        if (controller.signal.aborted) return
         showToast('Failed to load logs.', 'error')
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     },
     [showToast],
   )
+
+  // Fetch distinct service names once on mount
+  useEffect(() => {
+    getAdminLogServices()
+      .then(setAvailableServices)
+      .catch(() => { /* non-critical — dropdown stays empty */ })
+  }, [])
+
+  // Close service dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (serviceDropdownRef.current && !serviceDropdownRef.current.contains(e.target as Node)) {
+        setServiceDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Debounce search input
   function handleSearchChange(value: string) {
@@ -60,9 +94,25 @@ export default function LogsPage() {
     }, 400)
   }
 
+  function toggleService(svc: string) {
+    setSelectedServices((prev) =>
+      prev.includes(svc) ? prev.filter((s) => s !== svc) : [...prev, svc],
+    )
+    setPage(0)
+  }
+
+  function clearServices() {
+    setSelectedServices([])
+    setPage(0)
+  }
+
   useEffect(() => {
-    load(page, { level: level || undefined, service: service || undefined, search: search || undefined })
-  }, [load, page, level, service, search])
+    load(page, {
+      level: level || undefined,
+      service: selectedServices.length > 0 ? selectedServices : undefined,
+      search: search || undefined,
+    })
+  }, [load, page, level, selectedServices, search])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -71,7 +121,11 @@ export default function LogsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Application Logs</h1>
         <button
-          onClick={() => load(page, { level: level || undefined, service: service || undefined, search: search || undefined })}
+          onClick={() => load(page, {
+            level: level || undefined,
+            service: selectedServices.length > 0 ? selectedServices : undefined,
+            search: search || undefined,
+          })}
           disabled={loading}
           className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-gray-500 transition hover:text-gray-700 disabled:opacity-50 dark:text-brand-400 dark:hover:text-white"
           title="Refresh"
@@ -95,14 +149,58 @@ export default function LogsPage() {
           ))}
         </select>
 
-        {/* Service filter */}
-        <input
-          type="text"
-          placeholder="Service (e.g. backend)"
-          value={service}
-          onChange={(e) => { setService(e.target.value); setPage(0) }}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-brand-700 dark:bg-brand-800 dark:text-brand-200 dark:placeholder-brand-500"
-        />
+        {/* Service multi-select dropdown */}
+        <div className="relative" ref={serviceDropdownRef}>
+          <button
+            type="button"
+            onClick={() => setServiceDropdownOpen((o) => !o)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-brand-700 dark:bg-brand-800 dark:text-brand-200"
+          >
+            <span>
+              {selectedServices.length === 0
+                ? 'All services'
+                : selectedServices.length === 1
+                  ? selectedServices[0]
+                  : `${selectedServices.length} services`}
+            </span>
+            <ChevronDown className="h-3.5 w-3.5 text-gray-400 dark:text-brand-500" />
+          </button>
+
+          {serviceDropdownOpen && (
+            <div className="absolute left-0 top-full z-20 mt-1 min-w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-brand-700 dark:bg-brand-800">
+              {availableServices.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-gray-400 dark:text-brand-500">No services found</p>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={clearServices}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-brand-200 dark:hover:bg-brand-700"
+                  >
+                    <span className={`h-4 w-4 rounded border flex items-center justify-center text-xs ${selectedServices.length === 0 ? 'border-brand-500 bg-brand-500 text-white' : 'border-gray-300 dark:border-brand-600'}`}>
+                      {selectedServices.length === 0 && '✓'}
+                    </span>
+                    All services
+                  </button>
+                  <div className="my-1 border-t border-gray-100 dark:border-brand-700" />
+                  {availableServices.map((svc) => (
+                    <button
+                      key={svc}
+                      type="button"
+                      onClick={() => toggleService(svc)}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-brand-200 dark:hover:bg-brand-700"
+                    >
+                      <span className={`h-4 w-4 rounded border flex items-center justify-center text-xs ${selectedServices.includes(svc) ? 'border-brand-500 bg-brand-500 text-white' : 'border-gray-300 dark:border-brand-600'}`}>
+                        {selectedServices.includes(svc) && '✓'}
+                      </span>
+                      {svc}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Search */}
         <div className="relative flex-1 min-w-48">

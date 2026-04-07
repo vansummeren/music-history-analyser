@@ -27,6 +27,7 @@ from app.schemas.admin import (
     AppLogRead,  # noqa: F401 - re-exported for API responses
     AppLogsResponse,
     DbStatsResponse,
+    LogServicesResponse,
     TableRow,
     TableSizeRow,
     TablesResponse,
@@ -399,10 +400,26 @@ async def get_user_detail(
 # ── GET /api/admin/logs ───────────────────────────────────────────────────────
 
 
+@router.get("/logs/services", response_model=LogServicesResponse)
+async def get_log_services(
+    _user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> LogServicesResponse:
+    """Return the distinct service names present in the log table (admin only)."""
+    rows = (
+        await db.execute(
+            select(AppLog.service).distinct().order_by(AppLog.service)
+        )
+    ).all()
+    return LogServicesResponse(services=[r[0] for r in rows])
+
+
 @router.get("/logs", response_model=AppLogsResponse)
 async def get_logs(
     level: str | None = Query(default=None, description="Filter by log level (e.g. ERROR)"),
-    service: str | None = Query(default=None, description="Filter by service name"),
+    service: list[str] | None = Query(
+        default=None, description="Filter by one or more service names"
+    ),
     search: str | None = Query(default=None, description="Substring search in message or logger"),
     since: datetime | None = Query(default=None, description="Only records at or after this time"),
     until: datetime | None = Query(default=None, description="Only records before or at this time"),
@@ -416,7 +433,7 @@ async def get_logs(
     if level:
         filters.append(AppLog.level == level.upper())
     if service:
-        filters.append(AppLog.service == service)
+        filters.append(AppLog.service.in_(service))
     if search:
         pattern = f"%{search}%"
         filters.append(

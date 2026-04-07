@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     spotify_retry_extra_seconds: int = 0
 
     # Build / version info (injected at image-build time via ARG → ENV)
-    app_version: str = "1.0.5"
+    app_version: str = "1.0.6"
     build_number: str = "dev"
     build_date: str = "unknown"
 

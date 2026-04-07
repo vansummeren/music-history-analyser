@@ -136,6 +136,10 @@ class AppLogsResponse(BaseModel):
     items: list[AppLogRead]
 
 
+class LogServicesResponse(BaseModel):
+    services: list[str]
+
+
 # ── Database statistics ───────────────────────────────────────────────────────
 
 
