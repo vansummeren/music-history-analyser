@@ -112,7 +112,6 @@ export default function LogsPage() {
       service: selectedServices.length > 0 ? selectedServices : undefined,
       search: search || undefined,
     })
-    return () => { abortRef.current?.abort() }
   }, [load, page, level, selectedServices, search])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))

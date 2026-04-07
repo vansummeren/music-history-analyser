@@ -462,11 +462,24 @@ async def _seed_logs(db: AsyncSession) -> None:
     """Insert a small set of log records with known level/service values."""
     from app.models.app_log import AppLog
 
+    base = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
     entries = [
-        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="INFO", service="backend", logger_name="app.test", message="Info backend"),
-        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="INFO", service="worker", logger_name="app.test", message="Info worker"),
-        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="ERROR", service="backend", logger_name="app.test", message="Error backend"),
-        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="WARNING", service="beat", logger_name="app.test", message="Warning beat"),
+        AppLog(
+            id=uuid.uuid4(), created_at=base,
+            level="INFO", service="backend", logger_name="app.test", message="Info backend",
+        ),
+        AppLog(
+            id=uuid.uuid4(), created_at=base + timedelta(seconds=1),
+            level="INFO", service="worker", logger_name="app.test", message="Info worker",
+        ),
+        AppLog(
+            id=uuid.uuid4(), created_at=base + timedelta(seconds=2),
+            level="ERROR", service="backend", logger_name="app.test", message="Error backend",
+        ),
+        AppLog(
+            id=uuid.uuid4(), created_at=base + timedelta(seconds=3),
+            level="WARNING", service="beat", logger_name="app.test", message="Warning beat",
+        ),
     ]
     for entry in entries:
         db.add(entry)
