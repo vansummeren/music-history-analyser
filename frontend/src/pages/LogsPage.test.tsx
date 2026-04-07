@@ -103,7 +103,7 @@ describe('LogsPage', () => {
 
     await waitFor(() => {
       const lastCall = vi.mocked(adminApi.getAdminLogs).mock.lastCall
-      expect(lastCall?.[0].service).toBeUndefined()
+      expect(lastCall?.[0]?.service).toBeUndefined()
     })
   })
 })
