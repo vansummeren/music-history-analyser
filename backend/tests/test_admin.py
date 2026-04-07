@@ -453,3 +453,151 @@ async def test_get_user_detail_returns_data(
     assert len(data["spotify_accounts"]) == 1
     assert data["spotify_accounts"][0]["id"] == str(account.id)
     assert "play_events_count" in data["spotify_accounts"][0]
+
+
+# ── Application logs ──────────────────────────────────────────────────────────
+
+
+async def _seed_logs(db: AsyncSession) -> None:
+    """Insert a small set of log records with known level/service values."""
+    from app.models.app_log import AppLog
+
+    entries = [
+        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="INFO", service="backend", logger_name="app.test", message="Info backend"),
+        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="INFO", service="worker", logger_name="app.test", message="Info worker"),
+        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="ERROR", service="backend", logger_name="app.test", message="Error backend"),
+        AppLog(id=uuid.uuid4(), created_at=datetime.now(UTC), level="WARNING", service="beat", logger_name="app.test", message="Warning beat"),
+    ]
+    for entry in entries:
+        db.add(entry)
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_get_log_services_returns_distinct_names(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    admin, admin_token = await _make_user(
+        db_session, fake_redis, sub="svc-admin", email="svcadmin@example.com"
+    )
+    admin.role = "admin"
+    await db_session.commit()
+    await _seed_logs(db_session)
+
+    resp = await client.get(
+        "/api/admin/logs/services",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert set(data["services"]) == {"backend", "beat", "worker"}
+
+
+@pytest.mark.asyncio
+async def test_get_logs_filter_by_level(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    admin, admin_token = await _make_user(
+        db_session, fake_redis, sub="lvl-admin", email="lvladmin@example.com"
+    )
+    admin.role = "admin"
+    await db_session.commit()
+    await _seed_logs(db_session)
+
+    resp = await client.get(
+        "/api/admin/logs?level=INFO",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert all(item["level"] == "INFO" for item in data["items"])
+
+
+@pytest.mark.asyncio
+async def test_get_logs_filter_by_single_service(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    admin, admin_token = await _make_user(
+        db_session, fake_redis, sub="svc1-admin", email="svc1admin@example.com"
+    )
+    admin.role = "admin"
+    await db_session.commit()
+    await _seed_logs(db_session)
+
+    resp = await client.get(
+        "/api/admin/logs?service=backend",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert all(item["service"] == "backend" for item in data["items"])
+
+
+@pytest.mark.asyncio
+async def test_get_logs_filter_by_multiple_services(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    admin, admin_token = await _make_user(
+        db_session, fake_redis, sub="svc2-admin", email="svc2admin@example.com"
+    )
+    admin.role = "admin"
+    await db_session.commit()
+    await _seed_logs(db_session)
+
+    resp = await client.get(
+        "/api/admin/logs?service=backend&service=worker",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 3
+    assert all(item["service"] in {"backend", "worker"} for item in data["items"])
+
+
+@pytest.mark.asyncio
+async def test_get_logs_filter_by_search(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    admin, admin_token = await _make_user(
+        db_session, fake_redis, sub="srch-admin", email="srchadmin@example.com"
+    )
+    admin.role = "admin"
+    await db_session.commit()
+    await _seed_logs(db_session)
+
+    resp = await client.get(
+        "/api/admin/logs?search=Error",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["items"][0]["level"] == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_get_log_services_requires_admin(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: FakeRedis,
+) -> None:
+    user, token = await _make_user(
+        db_session, fake_redis, sub="nonadmin-svc", email="nonadminsvc@example.com"
+    )
+    resp = await client.get(
+        "/api/admin/logs/services",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403

@@ -115,7 +115,7 @@ export interface AppLogsResponse {
 
 export interface LogsFilter {
   level?: string
-  service?: string
+  service?: string[]
   search?: string
   since?: string
   until?: string
@@ -194,10 +194,10 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
 }
 
 /** Fetch paginated application log entries (admin only). */
-export async function getAdminLogs(filter: LogsFilter = {}): Promise<AppLogsResponse> {
-  const params: Record<string, string | number> = {}
+export async function getAdminLogs(filter: LogsFilter = {}, signal?: AbortSignal): Promise<AppLogsResponse> {
+  const params: Record<string, string | number | string[]> = {}
   if (filter.level) params.level = filter.level
-  if (filter.service) params.service = filter.service
+  if (filter.service && filter.service.length > 0) params.service = filter.service
   if (filter.search) params.search = filter.search
   if (filter.since) params.since = filter.since
   if (filter.until) params.until = filter.until
@@ -207,8 +207,18 @@ export async function getAdminLogs(filter: LogsFilter = {}): Promise<AppLogsResp
   const resp = await api.get<AppLogsResponse>('/admin/logs', {
     headers: authHeaders(),
     params,
+    paramsSerializer: { indexes: null },
+    signal,
   })
   return resp.data
+}
+
+/** Fetch the distinct service names present in the log table (admin only). */
+export async function getAdminLogServices(): Promise<string[]> {
+  const resp = await api.get<{ services: string[] }>('/admin/logs/services', {
+    headers: authHeaders(),
+  })
+  return resp.data.services
 }
 
 /** Fetch database size statistics (admin only). */
